@@ -1,0 +1,22 @@
+import { app } from 'electron';
+import { AuthService } from './auth';
+import { GitHubService } from './github';
+import { DatabaseService } from './database';
+
+export async function initializeServices(): Promise<void> {
+    try {
+        // Initialize database first
+        await DatabaseService.initialize();
+
+        // Initialize auth service
+        await AuthService.initialize();
+
+        // Initialize other services
+        GitHubService.initialize();
+
+        console.log('All services initialized successfully');
+    } catch (error) {
+        console.error('Failed to initialize services:', error);
+        app.quit();
+    }
+}
