@@ -144,6 +144,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
         openBrowser: secureInvoke('workflows:open-browser', ([htmlUrl]) => validators.isString(htmlUrl)),
     },
 
+    // Database management methods
+    database: {
+        getConnections: secureInvoke('database:get-connections'),
+        createConnection: secureInvoke('database:create-connection', ([connectionData]) => validators.isObject(connectionData)),
+        testConnection: secureInvoke('database:test-connection', ([connectionId]) => validators.isString(connectionId)),
+        deleteConnection: secureInvoke('database:delete-connection', ([connectionId]) => validators.isString(connectionId)),
+        getTables: secureInvoke('database:get-tables', ([connectionId]) => validators.isString(connectionId)),
+        executeQuery: secureInvoke('database:execute-query', ([connectionId, query]) =>
+            validators.isString(connectionId) && validators.isString(query)
+        ),
+        getMetrics: secureInvoke('database:get-metrics'),
+        getHealth: secureInvoke('database:get-health'),
+        getQueryHistory: secureInvoke('database:get-query-history'),
+        exportData: secureInvoke('database:export-data', ([connectionId, format]) =>
+            validators.isString(connectionId) && validators.isString(format)
+        ),
+        openExternal: secureInvoke('database:open-external', ([connectionId]) => validators.isString(connectionId)),
+    },
+
     // Event listener methods with channel validation
     on: (channel: string, func: (...args: any[]) => void) => {
         if (!validators.isString(channel) || !/^[a-zA-Z0-9:-]+$/.test(channel)) {
@@ -231,6 +250,19 @@ export interface ElectronAPI {
         cancel: (owner: string, repo: string, runId: number) => Promise<IPCResponse>;
         rerun: (owner: string, repo: string, runId: number) => Promise<IPCResponse>;
         openBrowser: (htmlUrl: string) => Promise<IPCResponse>;
+    };
+    database: {
+        getConnections: () => Promise<IPCResponse>;
+        createConnection: (connectionData: any) => Promise<IPCResponse>;
+        testConnection: (connectionId: string) => Promise<IPCResponse>;
+        deleteConnection: (connectionId: string) => Promise<IPCResponse>;
+        getTables: (connectionId: string) => Promise<IPCResponse>;
+        executeQuery: (connectionId: string, query: string) => Promise<IPCResponse>;
+        getMetrics: () => Promise<IPCResponse>;
+        getHealth: () => Promise<IPCResponse>;
+        getQueryHistory: () => Promise<IPCResponse>;
+        exportData: (connectionId: string, format: string) => Promise<IPCResponse>;
+        openExternal: (connectionId: string) => Promise<IPCResponse>;
     };
     on: (channel: string, func: (...args: any[]) => void) => void;
     removeAllListeners: (channel: string) => void;

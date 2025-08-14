@@ -5,6 +5,7 @@ import { DatabaseService } from './database';
 import { DashboardService } from './dashboard';
 import { RepositoryService } from './repository';
 import { WorkflowService } from './workflow';
+import { DatabaseManagementService } from './databaseManagement';
 
 export async function initializeServices(): Promise<void> {
     try {
@@ -19,6 +20,7 @@ export async function initializeServices(): Promise<void> {
         DashboardService.initialize();
         RepositoryService.initialize();
         WorkflowService.initialize();
+        DatabaseManagementService.initialize();
 
         console.log('All services initialized successfully');
     } catch (error) {

@@ -4,6 +4,7 @@ import { GitHubService } from '../services/github';
 import { DashboardService } from '../services/dashboard';
 import { RepositoryService } from '../services/repository';
 import { WorkflowService } from '../services/workflow';
+import { DatabaseManagementService } from '../services/databaseManagement';
 import { IPCResponse } from '../../shared/types';
 
 export function registerIPCHandlers(): void {
@@ -217,6 +218,106 @@ export function registerIPCHandlers(): void {
         try {
             await WorkflowService.getInstance().openWorkflowInBrowser(htmlUrl);
             return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    // Database Management handlers
+    ipcMain.handle('database:get-connections', async (): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().getAllConnections();
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:create-connection', async (_, connectionData: any): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().createConnection(connectionData);
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:test-connection', async (_, connectionId: string): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().testConnection(connectionId);
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:delete-connection', async (_, connectionId: string): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().deleteConnection(connectionId);
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:get-tables', async (_, connectionId: string): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().getConnectionTables(connectionId);
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:execute-query', async (_, connectionId: string, query: string): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().executeQuery(connectionId, query);
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:get-metrics', async (): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().getDatabaseMetrics();
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:get-health', async (): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().getDatabaseHealth();
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:get-query-history', async (): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().getQueryHistory();
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:export-data', async (_, connectionId: string, format: string): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().exportData(connectionId, format as 'sql' | 'json' | 'csv');
+            return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('database:open-external', async (_, connectionId: string): Promise<IPCResponse> => {
+        try {
+            const result = await DatabaseManagementService.getInstance().openDatabaseInExternal(connectionId);
+            return result;
         } catch (error) {
             return { success: false, error: (error as Error).message };
         }

@@ -121,7 +121,7 @@ export default function Database() {
                 connectionId: selectedConnection.id,
                 format
             })).unwrap();
-            
+
             // Create download link
             const blob = new Blob([result], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
@@ -201,7 +201,7 @@ export default function Database() {
                             Add Connection
                         </button>
                     </div>
-                    
+
                     {lastUpdated && (
                         <p className="text-xs text-gray-500">
                             Updated {formatDate(lastUpdated)}
@@ -230,11 +230,10 @@ export default function Database() {
                         {connections.map((connection) => (
                             <div
                                 key={connection.id}
-                                className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                                    selectedConnection?.id === connection.id
+                                className={`p-3 rounded-lg border cursor-pointer transition-colors ${selectedConnection?.id === connection.id
                                         ? 'border-primary-500 bg-primary-50'
                                         : 'border-gray-200 bg-white hover:bg-gray-50'
-                                }`}
+                                    }`}
                                 onClick={() => handleSelectConnection(connection)}
                             >
                                 <div className="flex items-start justify-between">
@@ -348,11 +347,10 @@ export default function Database() {
                                     <button
                                         key={tab.id}
                                         onClick={() => dispatch(setActiveTab(tab.id as any))}
-                                        className={`flex items-center space-x-2 px-4 py-2 border-b-2 font-medium text-sm transition-colors ${
-                                            activeTab === tab.id
+                                        className={`flex items-center space-x-2 px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === tab.id
                                                 ? 'border-primary-500 text-primary-600'
                                                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                                        }`}
+                                            }`}
                                     >
                                         <span>{tab.icon}</span>
                                         <span>{tab.label}</span>
@@ -438,7 +436,7 @@ export default function Database() {
                                                 </button>
                                             </div>
                                         </div>
-                                        
+
                                         <div className="flex-1 flex flex-col">
                                             <div className="p-4 border-b border-gray-200">
                                                 <textarea
@@ -448,7 +446,7 @@ export default function Database() {
                                                     className="w-full h-32 p-3 border border-gray-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
                                                 />
                                             </div>
-                                            
+
                                             <div className="flex-1 overflow-auto p-4">
                                                 {queryLoading && (
                                                     <div className="text-center py-8">
@@ -456,7 +454,7 @@ export default function Database() {
                                                         <p className="mt-2 text-sm text-gray-500">Executing query...</p>
                                                     </div>
                                                 )}
-                                                
+
                                                 {queryResult && !queryLoading && (
                                                     <div>
                                                         <div className="mb-4 text-sm text-gray-600">
@@ -488,7 +486,7 @@ export default function Database() {
                                                         </div>
                                                     </div>
                                                 )}
-                                                
+
                                                 {!queryResult && !queryLoading && (
                                                     <div className="text-center py-8 text-gray-500">
                                                         <svg className="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -514,11 +512,10 @@ export default function Database() {
                                             <div className="p-6">
                                                 {health ? (
                                                     <div>
-                                                        <div className={`text-center mb-6 p-4 rounded-lg ${
-                                                            health.status === 'healthy' ? 'bg-green-50 text-green-800' :
-                                                            health.status === 'warning' ? 'bg-yellow-50 text-yellow-800' :
-                                                            'bg-red-50 text-red-800'
-                                                        }`}>
+                                                        <div className={`text-center mb-6 p-4 rounded-lg ${health.status === 'healthy' ? 'bg-green-50 text-green-800' :
+                                                                health.status === 'warning' ? 'bg-yellow-50 text-yellow-800' :
+                                                                    'bg-red-50 text-red-800'
+                                                            }`}>
                                                             <div className="text-3xl font-bold">{health.score}%</div>
                                                             <div className="text-sm uppercase font-medium">{health.status}</div>
                                                         </div>
@@ -526,11 +523,10 @@ export default function Database() {
                                                             {health.checks.map((check, index) => (
                                                                 <div key={index} className="flex items-center justify-between">
                                                                     <div className="flex items-center space-x-2">
-                                                                        <span className={`w-2 h-2 rounded-full ${
-                                                                            check.status === 'pass' ? 'bg-green-500' :
-                                                                            check.status === 'warning' ? 'bg-yellow-500' :
-                                                                            'bg-red-500'
-                                                                        }`}></span>
+                                                                        <span className={`w-2 h-2 rounded-full ${check.status === 'pass' ? 'bg-green-500' :
+                                                                                check.status === 'warning' ? 'bg-yellow-500' :
+                                                                                    'bg-red-500'
+                                                                            }`}></span>
                                                                         <span className="text-sm font-medium">{check.name}</span>
                                                                     </div>
                                                                     <span className="text-sm text-gray-500">{check.value}</span>
