@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import MonacoEditor from '@monaco-editor/react';
+import VisualWorkflowBuilder from '../components/workflow/VisualWorkflowBuilder';
 
 const WORKFLOW_TEMPLATES = {
     'nodejs': `name: Node.js CI
@@ -121,6 +122,7 @@ export default function Workflows() {
     const [showNewWorkflow, setShowNewWorkflow] = useState(false);
     const [newWorkflowName, setNewWorkflowName] = useState('');
     const [selectedTemplate, setSelectedTemplate] = useState<keyof typeof WORKFLOW_TEMPLATES | ''>('');
+    const [viewMode, setViewMode] = useState<'code' | 'visual'>('code');
 
     const handleSelectWorkflow = (id: number) => {
         const workflow = workflows.find(w => w.id === id);
@@ -189,17 +191,17 @@ export default function Workflows() {
                             <button
                                 key={wf.id}
                                 className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedWorkflow?.id === wf.id
-                                        ? 'border-primary-500 bg-primary-50'
-                                        : 'border-gray-200 bg-white hover:bg-gray-50'
+                                    ? 'border-primary-500 bg-primary-50'
+                                    : 'border-gray-200 bg-white hover:bg-gray-50'
                                     }`}
                                 onClick={() => handleSelectWorkflow(wf.id)}
                             >
                                 <div className="flex items-center justify-between">
                                     <span className="font-medium text-gray-900 truncate">{wf.name}</span>
                                     <span className={`text-xs px-2 py-1 rounded-full ${wf.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                            wf.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                                                wf.status === 'failure' ? 'bg-red-100 text-red-800' :
-                                                    'bg-gray-100 text-gray-800'
+                                        wf.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                                            wf.status === 'failure' ? 'bg-red-100 text-red-800' :
+                                                'bg-gray-100 text-gray-800'
                                         }`}>
                                         {wf.status}
                                     </span>
@@ -226,7 +228,29 @@ export default function Workflows() {
                                         Run #{selectedWorkflow.run_number} • {selectedWorkflow.head_branch}
                                     </p>
                                 </div>
-                                <div className="flex space-x-2">
+                                <div className="flex items-center space-x-2">
+                                    {/* View Mode Toggle */}
+                                    <div className="flex bg-gray-100 rounded-lg p-1">
+                                        <button
+                                            onClick={() => setViewMode('code')}
+                                            className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${viewMode === 'code'
+                                                    ? 'bg-white text-gray-900 shadow-sm'
+                                                    : 'text-gray-600 hover:text-gray-900'
+                                                }`}
+                                        >
+                                            Code
+                                        </button>
+                                        <button
+                                            onClick={() => setViewMode('visual')}
+                                            className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${viewMode === 'visual'
+                                                    ? 'bg-white text-gray-900 shadow-sm'
+                                                    : 'text-gray-600 hover:text-gray-900'
+                                                }`}
+                                        >
+                                            Visual
+                                        </button>
+                                    </div>
+
                                     {!isEditing ? (
                                         <button
                                             onClick={handleEditWorkflow}
@@ -254,28 +278,34 @@ export default function Workflows() {
                             </div>
                         </div>
 
-                        {/* Editor */}
+                        {/* Content */}
                         <div className="flex-1 p-4">
-                            <div className="h-full border border-gray-200 rounded-lg overflow-hidden">
-                                <MonacoEditor
-                                    height="100%"
-                                    defaultLanguage="yaml"
-                                    value={isEditing ? editedYAML : workflowYAML}
-                                    onChange={(value) => isEditing && setEditedYAML(value || '')}
-                                    options={{
-                                        readOnly: !isEditing,
-                                        fontSize: 14,
-                                        minimap: { enabled: false },
-                                        scrollBeyondLastLine: false,
-                                        automaticLayout: true,
-                                        theme: 'vs-light',
-                                        wordWrap: 'on',
-                                        folding: true,
-                                        lineNumbers: 'on',
-                                        renderWhitespace: 'boundary'
-                                    }}
-                                />
-                            </div>
+                            {viewMode === 'visual' ? (
+                                <div className="h-full border border-gray-200 rounded-lg overflow-hidden">
+                                    <VisualWorkflowBuilder />
+                                </div>
+                            ) : (
+                                <div className="h-full border border-gray-200 rounded-lg overflow-hidden">
+                                    <MonacoEditor
+                                        height="100%"
+                                        defaultLanguage="yaml"
+                                        value={isEditing ? editedYAML : workflowYAML}
+                                        onChange={(value) => isEditing && setEditedYAML(value || '')}
+                                        options={{
+                                            readOnly: !isEditing,
+                                            fontSize: 14,
+                                            minimap: { enabled: false },
+                                            scrollBeyondLastLine: false,
+                                            automaticLayout: true,
+                                            theme: 'vs-light',
+                                            wordWrap: 'on',
+                                            folding: true,
+                                            lineNumbers: 'on',
+                                            renderWhitespace: 'boundary'
+                                        }}
+                                    />
+                                </div>
+                            )}
                         </div>
                     </>
                 ) : (
@@ -321,8 +351,8 @@ export default function Workflows() {
                                             key={key}
                                             onClick={() => handleTemplateSelect(key as keyof typeof WORKFLOW_TEMPLATES)}
                                             className={`text-left p-3 border rounded-lg transition-colors ${selectedTemplate === key
-                                                    ? 'border-primary-500 bg-primary-50'
-                                                    : 'border-gray-200 hover:bg-gray-50'
+                                                ? 'border-primary-500 bg-primary-50'
+                                                : 'border-gray-200 hover:bg-gray-50'
                                                 }`}
                                         >
                                             <div className="font-medium capitalize">{key.replace('_', ' ')}</div>

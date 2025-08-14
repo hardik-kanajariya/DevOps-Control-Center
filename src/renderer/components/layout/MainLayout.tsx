@@ -7,6 +7,10 @@ import Repositories from '../../views/Repositories';
 import Servers from '../../views/Servers';
 import Pipelines from '../../views/Pipelines';
 import Settings from '../../views/Settings';
+import Monitoring from '../../views/Monitoring';
+import Docker from '../../views/Docker';
+import Database from '../../views/Database';
+import AutoUpdater from '../AutoUpdater';
 
 export default function MainLayout() {
     const [currentView, setCurrentView] = useState<string>('dashboard');
@@ -24,6 +28,12 @@ export default function MainLayout() {
                 return <Pipelines />;
             case 'servers':
                 return <Servers />;
+            case 'monitoring':
+                return <Monitoring />;
+            case 'docker':
+                return <Docker />;
+            case 'database':
+                return <Database />;
             case 'settings':
                 return <Settings />;
             default:
@@ -49,6 +59,9 @@ export default function MainLayout() {
                     {renderView()}
                 </main>
             </div>
+
+            {/* Auto-updater component */}
+            <AutoUpdater />
         </div>
     );
 }
