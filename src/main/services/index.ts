@@ -2,6 +2,9 @@ import { app } from 'electron';
 import { AuthService } from './auth';
 import { GitHubService } from './github';
 import { DatabaseService } from './database';
+import { DashboardService } from './dashboard';
+import { RepositoryService } from './repository';
+import { WorkflowService } from './workflow';
 
 export async function initializeServices(): Promise<void> {
     try {
@@ -13,6 +16,9 @@ export async function initializeServices(): Promise<void> {
 
         // Initialize other services
         GitHubService.initialize();
+        DashboardService.initialize();
+        RepositoryService.initialize();
+        WorkflowService.initialize();
 
         console.log('All services initialized successfully');
     } catch (error) {

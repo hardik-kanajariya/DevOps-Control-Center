@@ -88,6 +88,52 @@ export interface AppSettings {
     sshKeyPath: string;
 }
 
+// Dashboard related types
+export interface ActivityItem {
+    id: string;
+    type: 'deployment' | 'repository' | 'server' | 'workflow' | 'error' | 'info';
+    title: string;
+    description: string;
+    timestamp: string;
+    status: 'success' | 'error' | 'warning' | 'info';
+    repository?: string;
+    server?: string;
+    workflow?: string;
+}
+
+export interface SystemHealth {
+    cpu: number;
+    memory: number;
+    disk: number;
+    network: 'online' | 'offline' | 'limited';
+    services: ServiceStatus[];
+}
+
+export interface ServiceStatus {
+    name: string;
+    status: 'running' | 'stopped' | 'error';
+    uptime: number;
+    lastCheck: string;
+}
+
+export interface DeploymentMetrics {
+    totalDeployments: number;
+    successRate: number;
+    averageDeployTime: number;
+    deploymentsToday: number;
+    failedDeployments: number;
+}
+
+export interface DashboardStats {
+    repositoriesCount: number;
+    successfulDeployments: number;
+    activePipelines: number;
+    connectedServers: number;
+    recentActivity: ActivityItem[];
+    systemHealth: SystemHealth;
+    deploymentMetrics: DeploymentMetrics;
+}
+
 // IPC Channel types
 export type IPCChannels =
     | 'auth:set-token'
@@ -97,6 +143,17 @@ export type IPCChannels =
     | 'repos:list'
     | 'repos:get'
     | 'repos:clone'
+    | 'repos:search'
+    | 'repos:analytics'
+    | 'repos:workflows'
+    | 'repos:open-browser'
+    | 'repos:check-local'
+    | 'workflows:list-all'
+    | 'workflows:list-repo'
+    | 'workflows:get-yaml'
+    | 'workflows:cancel'
+    | 'workflows:rerun'
+    | 'workflows:open-browser'
     | 'servers:list'
     | 'servers:add'
     | 'servers:connect'

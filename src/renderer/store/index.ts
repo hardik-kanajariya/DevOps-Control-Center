@@ -3,6 +3,7 @@ import authSlice from './slices/authSlice';
 import repositoriesSlice from './slices/repositoriesSlice';
 import serversSlice from './slices/serversSlice';
 import workflowsSlice from './slices/workflowsSlice';
+import dashboardSlice from './slices/dashboardSlice';
 
 export const store = configureStore({
     reducer: {
@@ -10,6 +11,7 @@ export const store = configureStore({
         repositories: repositoriesSlice,
         servers: serversSlice,
         workflows: workflowsSlice,
+        dashboard: dashboardSlice,
     },
     devTools: true,
 });

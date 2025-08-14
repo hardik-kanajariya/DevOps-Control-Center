@@ -25,7 +25,7 @@ const createWindow = (): void => {
     // Load the app
     if (isDev) {
         mainWindow.loadURL('http://localhost:5175');
-        mainWindow.webContents.openDevTools();
+        // mainWindow.webContents.openDevTools();
     } else {
         mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
     }
@@ -35,7 +35,7 @@ const createWindow = (): void => {
         mainWindow.show();
 
         if (isDev) {
-            mainWindow.webContents.openDevTools();
+            // mainWindow.webContents.openDevTools();
         }
     });
 

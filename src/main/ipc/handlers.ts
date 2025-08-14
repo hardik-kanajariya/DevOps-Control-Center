@@ -1,6 +1,9 @@
 import { ipcMain } from 'electron';
 import { AuthService } from '../services/auth';
 import { GitHubService } from '../services/github';
+import { DashboardService } from '../services/dashboard';
+import { RepositoryService } from '../services/repository';
+import { WorkflowService } from '../services/workflow';
 import { IPCResponse } from '../../shared/types';
 
 export function registerIPCHandlers(): void {
@@ -57,7 +60,7 @@ export function registerIPCHandlers(): void {
     // Repository handlers
     ipcMain.handle('repos:list', async (): Promise<IPCResponse> => {
         try {
-            const repos = await GitHubService.getRepositories();
+            const repos = await RepositoryService.getRepositories();
             return { success: true, data: repos };
         } catch (error) {
             return { success: false, error: (error as Error).message };
@@ -66,8 +69,154 @@ export function registerIPCHandlers(): void {
 
     ipcMain.handle('repos:get', async (_, repoName: string): Promise<IPCResponse> => {
         try {
-            const repo = await GitHubService.getRepository(repoName);
+            const repo = await RepositoryService.getRepository(repoName);
             return { success: true, data: repo };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('repos:clone', async (_, repoUrl: string, localPath: string): Promise<IPCResponse> => {
+        try {
+            await RepositoryService.cloneRepository(repoUrl, localPath);
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('repos:search', async (_, query: string, filters?: any): Promise<IPCResponse> => {
+        try {
+            const repos = await RepositoryService.searchRepositories(query, filters);
+            return { success: true, data: repos };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('repos:analytics', async (_, repoName: string): Promise<IPCResponse> => {
+        try {
+            const analytics = await RepositoryService.getRepositoryAnalytics(repoName);
+            return { success: true, data: analytics };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('repos:workflows', async (_, repoName: string): Promise<IPCResponse> => {
+        try {
+            const workflows = await RepositoryService.getRepositoryWorkflows(repoName);
+            return { success: true, data: workflows };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('repos:open-browser', async (_, htmlUrl: string): Promise<IPCResponse> => {
+        try {
+            await RepositoryService.openRepositoryInBrowser(htmlUrl);
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('repos:check-local', async (_, localPath: string): Promise<IPCResponse> => {
+        try {
+            const exists = await RepositoryService.checkLocalRepository(localPath);
+            return { success: true, data: exists };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    // Dashboard handlers
+    ipcMain.handle('dashboard:get-stats', async (): Promise<IPCResponse> => {
+        try {
+            const stats = await DashboardService.getDashboardStats();
+            return { success: true, data: stats };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('dashboard:get-recent-activity', async (_, limit?: number): Promise<IPCResponse> => {
+        try {
+            const activity = DashboardService.getRecentActivity(limit);
+            return { success: true, data: activity };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('dashboard:get-system-health', async (): Promise<IPCResponse> => {
+        try {
+            const health = await DashboardService.getSystemHealth();
+            return { success: true, data: health };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('dashboard:refresh-stats', async (): Promise<IPCResponse> => {
+        try {
+            const stats = await DashboardService.refreshStats();
+            return { success: true, data: stats };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    // Workflow handlers
+    ipcMain.handle('workflows:list-all', async (): Promise<IPCResponse> => {
+        try {
+            const workflows = await WorkflowService.getInstance().getAllWorkflowRuns();
+            return { success: true, data: workflows };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('workflows:list-repo', async (_, owner: string, repo: string): Promise<IPCResponse> => {
+        try {
+            const workflows = await WorkflowService.getInstance().getRepositoryWorkflowRuns(owner, repo);
+            return { success: true, data: workflows };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('workflows:get-yaml', async (_, owner: string, repo: string, workflowId: number): Promise<IPCResponse> => {
+        try {
+            const yaml = await WorkflowService.getInstance().getWorkflowYAML(owner, repo, workflowId);
+            return { success: true, data: yaml };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('workflows:cancel', async (_, owner: string, repo: string, runId: number): Promise<IPCResponse> => {
+        try {
+            await WorkflowService.getInstance().cancelWorkflowRun(owner, repo, runId);
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('workflows:rerun', async (_, owner: string, repo: string, runId: number): Promise<IPCResponse> => {
+        try {
+            await WorkflowService.getInstance().rerunWorkflow(owner, repo, runId);
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('workflows:open-browser', async (_, htmlUrl: string): Promise<IPCResponse> => {
+        try {
+            await WorkflowService.getInstance().openWorkflowInBrowser(htmlUrl);
+            return { success: true };
         } catch (error) {
             return { success: false, error: (error as Error).message };
         }

@@ -70,6 +70,11 @@ export class AuthService {
         }
     }
 
+    static async isAuthenticated(): Promise<boolean> {
+        const token = await this.getToken();
+        return token !== null && await this.validateToken();
+    }
+
     static async clearAuth(): Promise<void> {
         this.token = null;
         (store as any).delete(this.TOKEN_KEY);

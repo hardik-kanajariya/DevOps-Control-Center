@@ -52,6 +52,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
             validators.isString(repoUrl) && validators.isValidUrl(repoUrl) &&
             validators.isString(localPath) && validators.isValidPath(localPath)
         ),
+        search: secureInvoke('repos:search', ([query, filters]) =>
+            validators.isString(query) && (filters === undefined || validators.isObject(filters))
+        ),
+        analytics: secureInvoke('repos:analytics', ([repoName]) => validators.isString(repoName)),
+        workflows: secureInvoke('repos:workflows', ([repoName]) => validators.isString(repoName)),
+        openBrowser: secureInvoke('repos:open-browser', ([htmlUrl]) => validators.isString(htmlUrl)),
+        checkLocal: secureInvoke('repos:check-local', ([localPath]) => validators.isString(localPath)),
     },
 
     // Server methods
@@ -109,6 +116,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ),
     },
 
+    // Dashboard methods
+    dashboard: {
+        getStats: secureInvoke('dashboard:get-stats'),
+        getRecentActivity: secureInvoke('dashboard:get-recent-activity', ([limit]) =>
+            !limit || validators.isNumber(limit)
+        ),
+        getSystemHealth: secureInvoke('dashboard:get-system-health'),
+        refreshStats: secureInvoke('dashboard:refresh-stats'),
+    },
+
+    // Workflow methods
+    workflows: {
+        listAll: secureInvoke('workflows:list-all'),
+        listRepo: secureInvoke('workflows:list-repo', ([owner, repo]) =>
+            validators.isString(owner) && validators.isString(repo)
+        ),
+        getYAML: secureInvoke('workflows:get-yaml', ([owner, repo, workflowId]) =>
+            validators.isString(owner) && validators.isString(repo) && validators.isNumber(workflowId)
+        ),
+        cancel: secureInvoke('workflows:cancel', ([owner, repo, runId]) =>
+            validators.isString(owner) && validators.isString(repo) && validators.isNumber(runId)
+        ),
+        rerun: secureInvoke('workflows:rerun', ([owner, repo, runId]) =>
+            validators.isString(owner) && validators.isString(repo) && validators.isNumber(runId)
+        ),
+        openBrowser: secureInvoke('workflows:open-browser', ([htmlUrl]) => validators.isString(htmlUrl)),
+    },
+
     // Event listener methods with channel validation
     on: (channel: string, func: (...args: any[]) => void) => {
         if (!validators.isString(channel) || !/^[a-zA-Z0-9:-]+$/.test(channel)) {
@@ -140,6 +175,11 @@ export interface ElectronAPI {
         list: () => Promise<IPCResponse>;
         get: (repoName: string) => Promise<IPCResponse>;
         clone: (repoUrl: string, localPath: string) => Promise<IPCResponse>;
+        search: (query: string, filters?: any) => Promise<IPCResponse>;
+        analytics: (repoName: string) => Promise<IPCResponse>;
+        workflows: (repoName: string) => Promise<IPCResponse>;
+        openBrowser: (htmlUrl: string) => Promise<IPCResponse>;
+        checkLocal: (localPath: string) => Promise<IPCResponse>;
     };
     servers: {
         list: () => Promise<IPCResponse>;
@@ -177,6 +217,20 @@ export interface ElectronAPI {
     };
     notifications: {
         show: (title: string, body: string) => Promise<IPCResponse>;
+    };
+    dashboard: {
+        getStats: () => Promise<IPCResponse>;
+        getRecentActivity: (limit?: number) => Promise<IPCResponse>;
+        getSystemHealth: () => Promise<IPCResponse>;
+        refreshStats: () => Promise<IPCResponse>;
+    };
+    workflows: {
+        listAll: () => Promise<IPCResponse>;
+        listRepo: (owner: string, repo: string) => Promise<IPCResponse>;
+        getYAML: (owner: string, repo: string, workflowId: number) => Promise<IPCResponse>;
+        cancel: (owner: string, repo: string, runId: number) => Promise<IPCResponse>;
+        rerun: (owner: string, repo: string, runId: number) => Promise<IPCResponse>;
+        openBrowser: (htmlUrl: string) => Promise<IPCResponse>;
     };
     on: (channel: string, func: (...args: any[]) => void) => void;
     removeAllListeners: (channel: string) => void;
