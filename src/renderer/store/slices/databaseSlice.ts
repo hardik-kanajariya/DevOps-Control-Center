@@ -3,7 +3,7 @@ import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 interface DatabaseConnection {
     id: string;
     name: string;
-    type: 'postgresql' | 'mysql' | 'mongodb' | 'redis' | 'sqlite' | 'github_database';
+    type: 'postgresql' | 'mysql' | 'mongodb' | 'redis' | 'sqlite';
     host: string;
     port: number;
     database: string;
@@ -13,15 +13,18 @@ interface DatabaseConnection {
     ssl: boolean;
     connectionString?: string;
     metadata?: any;
+    createdAt: string;
+    updatedAt: string;
 }
 
 interface TableInfo {
     name: string;
     rows: number;
     size: string;
-    type: 'table' | 'view' | 'repository' | 'workflow' | 'action';
+    type: 'table' | 'view' | 'collection' | 'key';
     schema?: string;
     lastModified?: string;
+    columns?: { name: string; type: string; nullable: boolean; key: boolean }[];
 }
 
 interface QueryResult {
@@ -31,6 +34,7 @@ interface QueryResult {
     rowsAffected: number;
     query: string;
     timestamp: string;
+    error?: string;
 }
 
 interface DatabaseMetrics {
@@ -43,6 +47,7 @@ interface DatabaseMetrics {
     memoryUsage: number;
     diskUsage: number;
     cacheHitRatio: number;
+    lastUpdated: string;
 }
 
 interface DatabaseHealth {
@@ -109,7 +114,7 @@ export const fetchConnections = createAsyncThunk(
 
 export const createConnection = createAsyncThunk(
     'database/createConnection',
-    async (connectionData: Omit<DatabaseConnection, 'id' | 'status' | 'lastConnected'>, { rejectWithValue }) => {
+    async (connectionData: Omit<DatabaseConnection, 'id' | 'status' | 'lastConnected' | 'createdAt' | 'updatedAt'>, { rejectWithValue }) => {
         try {
             const response = await window.electronAPI.database.createConnection(connectionData);
             if (!response.success) {

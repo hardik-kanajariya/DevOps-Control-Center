@@ -38,7 +38,7 @@ export default function Database() {
         showAddModal
     } = useAppSelector((state) => state.database);
 
-    const [queryText, setQueryText] = useState('SELECT * FROM repositories LIMIT 10;');
+    const [queryText, setQueryText] = useState('SELECT * FROM users LIMIT 10;');
     const [connectionForm, setConnectionForm] = useState({
         name: '',
         type: 'postgresql' as const,
@@ -50,6 +50,40 @@ export default function Database() {
         ssl: false
     });
 
+    // Get example queries based on database type
+    const getExampleQueries = (type: string) => {
+        switch (type) {
+            case 'mysql':
+            case 'postgresql':
+                return [
+                    'SELECT * FROM users LIMIT 10;',
+                    'SHOW TABLES;',
+                    'SELECT COUNT(*) FROM users;',
+                    'DESCRIBE users;'
+                ];
+            case 'mongodb':
+                return [
+                    '{"collection": "users", "operation": "find", "filter": {}, "limit": 10}',
+                    '{"collection": "users", "operation": "aggregate", "pipeline": [{"$count": "total"}]}'
+                ];
+            case 'redis':
+                return [
+                    'KEYS *',
+                    'GET user:1',
+                    'SET user:1 "John Doe"',
+                    'DEL user:1'
+                ];
+            case 'sqlite':
+                return [
+                    'SELECT * FROM sqlite_master;',
+                    'SELECT * FROM users LIMIT 10;',
+                    'PRAGMA table_info(users);'
+                ];
+            default:
+                return ['SELECT * FROM users LIMIT 10;'];
+        }
+    };
+
     // Load connections and data on component mount
     useEffect(() => {
         dispatch(fetchConnections());
@@ -58,17 +92,25 @@ export default function Database() {
         dispatch(fetchQueryHistory());
     }, [dispatch]);
 
-    // Auto-refresh metrics and health every 30 seconds
+    // Auto-refresh metrics and health every 5 seconds for real-time monitoring
     useEffect(() => {
         const interval = setInterval(() => {
             if (activeTab === 'monitoring') {
                 dispatch(fetchMetrics());
                 dispatch(fetchHealth());
             }
-        }, 30 * 1000);
+        }, 5 * 1000); // Changed from 30 seconds to 5 seconds for real-time updates
 
         return () => clearInterval(interval);
     }, [dispatch, activeTab]);
+
+    // Immediate refresh when switching to monitoring tab
+    useEffect(() => {
+        if (activeTab === 'monitoring') {
+            dispatch(fetchMetrics());
+            dispatch(fetchHealth());
+        }
+    }, [activeTab, dispatch]);
 
     // Load tables when connection changes
     useEffect(() => {
@@ -93,17 +135,20 @@ export default function Database() {
 
     const handleCreateConnection = async (e: React.FormEvent) => {
         e.preventDefault();
-        await dispatch(createConnection(connectionForm));
-        setConnectionForm({
-            name: '',
-            type: 'postgresql',
-            host: '',
-            port: 5432,
-            database: '',
-            username: '',
-            password: '',
-            ssl: false
-        });
+        const result = await dispatch(createConnection(connectionForm));
+        if (createConnection.fulfilled.match(result)) {
+            setConnectionForm({
+                name: '',
+                type: 'postgresql',
+                host: '',
+                port: 5432,
+                database: '',
+                username: '',
+                password: '',
+                ssl: false
+            });
+            dispatch(setShowAddModal(false));
+        }
     };
 
     const handleExecuteQuery = async () => {
@@ -121,7 +166,7 @@ export default function Database() {
                 connectionId: selectedConnection.id,
                 format
             })).unwrap();
-            
+
             // Create download link
             const blob = new Blob([result], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
@@ -201,7 +246,7 @@ export default function Database() {
                             Add Connection
                         </button>
                     </div>
-                    
+
                     {lastUpdated && (
                         <p className="text-xs text-gray-500">
                             Updated {formatDate(lastUpdated)}
@@ -230,11 +275,10 @@ export default function Database() {
                         {connections.map((connection) => (
                             <div
                                 key={connection.id}
-                                className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                                    selectedConnection?.id === connection.id
-                                        ? 'border-primary-500 bg-primary-50'
-                                        : 'border-gray-200 bg-white hover:bg-gray-50'
-                                }`}
+                                className={`p-3 rounded-lg border cursor-pointer transition-colors ${selectedConnection?.id === connection.id
+                                    ? 'border-primary-500 bg-primary-50'
+                                    : 'border-gray-200 bg-white hover:bg-gray-50'
+                                    }`}
                                 onClick={() => handleSelectConnection(connection)}
                             >
                                 <div className="flex items-start justify-between">
@@ -348,11 +392,10 @@ export default function Database() {
                                     <button
                                         key={tab.id}
                                         onClick={() => dispatch(setActiveTab(tab.id as any))}
-                                        className={`flex items-center space-x-2 px-4 py-2 border-b-2 font-medium text-sm transition-colors ${
-                                            activeTab === tab.id
-                                                ? 'border-primary-500 text-primary-600'
-                                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                                        }`}
+                                        className={`flex items-center space-x-2 px-4 py-2 border-b-2 font-medium text-sm transition-colors ${activeTab === tab.id
+                                            ? 'border-primary-500 text-primary-600'
+                                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                            }`}
                                     >
                                         <span>{tab.icon}</span>
                                         <span>{tab.label}</span>
@@ -387,7 +430,7 @@ export default function Database() {
                                                             <td className="px-6 py-4 whitespace-nowrap">
                                                                 <div className="flex items-center">
                                                                     <span className="mr-2">
-                                                                        {table.type === 'table' ? '📋' : table.type === 'view' ? '👁️' : table.type === 'repository' ? '📁' : '⚙️'}
+                                                                        {table.type === 'table' ? '📋' : table.type === 'view' ? '👁️' : table.type === 'collection' ? '📁' : table.type === 'key' ? '�' : '⚙️'}
                                                                     </span>
                                                                     <span className="text-sm font-medium text-gray-900">{table.name}</span>
                                                                 </div>
@@ -423,6 +466,20 @@ export default function Database() {
                                         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                                             <h3 className="text-lg font-medium text-gray-900">Query Editor</h3>
                                             <div className="flex space-x-2">
+                                                {selectedConnection && (
+                                                    <select
+                                                        onChange={(e) => setQueryText(e.target.value)}
+                                                        className="text-sm border border-gray-300 rounded px-2 py-1"
+                                                        defaultValue=""
+                                                    >
+                                                        <option value="">Example Queries</option>
+                                                        {getExampleQueries(selectedConnection.type).map((query, index) => (
+                                                            <option key={index} value={query}>
+                                                                {query.length > 40 ? query.substring(0, 40) + '...' : query}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                )}
                                                 <button
                                                     onClick={() => dispatch(clearQueryResult())}
                                                     className="text-gray-500 hover:text-gray-700 text-sm"
@@ -438,7 +495,7 @@ export default function Database() {
                                                 </button>
                                             </div>
                                         </div>
-                                        
+
                                         <div className="flex-1 flex flex-col">
                                             <div className="p-4 border-b border-gray-200">
                                                 <textarea
@@ -448,47 +505,74 @@ export default function Database() {
                                                     className="w-full h-32 p-3 border border-gray-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
                                                 />
                                             </div>
-                                            
-                                            <div className="flex-1 overflow-auto p-4">
+
+                                            <div className="flex-1 flex flex-col min-h-0">
                                                 {queryLoading && (
                                                     <div className="text-center py-8">
                                                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
                                                         <p className="mt-2 text-sm text-gray-500">Executing query...</p>
                                                     </div>
                                                 )}
-                                                
+
                                                 {queryResult && !queryLoading && (
-                                                    <div>
-                                                        <div className="mb-4 text-sm text-gray-600">
+                                                    <div className="flex flex-col h-full">
+                                                        <div className="mb-4 text-sm text-gray-600 px-4 pt-4">
                                                             Query executed in {queryResult.executionTime}ms • {queryResult.rowsAffected} rows affected
                                                         </div>
-                                                        <div className="overflow-x-auto">
-                                                            <table className="min-w-full divide-y divide-gray-200 border border-gray-200">
-                                                                <thead className="bg-gray-50">
-                                                                    <tr>
-                                                                        {queryResult.columns.map((column, index) => (
-                                                                            <th key={index} className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-200">
-                                                                                {column}
-                                                                            </th>
-                                                                        ))}
-                                                                    </tr>
-                                                                </thead>
-                                                                <tbody className="bg-white divide-y divide-gray-200">
-                                                                    {queryResult.rows.map((row, rowIndex) => (
-                                                                        <tr key={rowIndex} className="hover:bg-gray-50">
-                                                                            {row.map((cell, cellIndex) => (
-                                                                                <td key={cellIndex} className="px-4 py-2 text-sm text-gray-900 border-r border-gray-200">
-                                                                                    {cell !== null ? String(cell) : <span className="text-gray-400">NULL</span>}
-                                                                                </td>
-                                                                            ))}
-                                                                        </tr>
-                                                                    ))}
-                                                                </tbody>
-                                                            </table>
-                                                        </div>
+                                                        {queryResult.error ? (
+                                                            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mx-4">
+                                                                <div className="flex items-start">
+                                                                    <svg className="w-5 h-5 text-red-400 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
+                                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                                                    </svg>
+                                                                    <div className="flex-1">
+                                                                        <h3 className="text-sm font-medium text-red-800">Query Error</h3>
+                                                                        <div className="mt-2 text-sm text-red-700">
+                                                                            <pre className="whitespace-pre-wrap font-mono text-xs bg-red-100 p-2 rounded border overflow-x-auto max-h-64 overflow-y-auto">
+                                                                                {queryResult.error}
+                                                                            </pre>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex-1 overflow-auto px-4 pb-4">
+                                                                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                                                                    <div className="overflow-auto max-h-96">
+                                                                        <table className="min-w-full divide-y divide-gray-200">
+                                                                            <thead className="bg-gray-50 sticky top-0 z-10">
+                                                                                <tr>
+                                                                                    {queryResult.columns.map((column, index) => (
+                                                                                        <th key={index} className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-200 bg-gray-50">
+                                                                                            {column}
+                                                                                        </th>
+                                                                                    ))}
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody className="bg-white divide-y divide-gray-200">
+                                                                                {queryResult.rows.map((row, rowIndex) => (
+                                                                                    <tr key={rowIndex} className="hover:bg-gray-50">
+                                                                                        {row.map((cell, cellIndex) => (
+                                                                                            <td key={cellIndex} className="px-4 py-2 text-sm text-gray-900 border-r border-gray-200 max-w-xs truncate" title={cell !== null ? String(cell) : 'NULL'}>
+                                                                                                {cell !== null ? String(cell) : <span className="text-gray-400">NULL</span>}
+                                                                                            </td>
+                                                                                        ))}
+                                                                                    </tr>
+                                                                                ))}
+                                                                            </tbody>
+                                                                        </table>
+                                                                    </div>
+                                                                </div>
+                                                                {queryResult.rows.length > 0 && (
+                                                                    <div className="mt-2 text-xs text-gray-500 text-center">
+                                                                        Showing {queryResult.rows.length} row(s) • Scroll to view more data
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
-                                                
+
                                                 {!queryResult && !queryLoading && (
                                                     <div className="text-center py-8 text-gray-500">
                                                         <svg className="mx-auto h-12 w-12 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -505,41 +589,56 @@ export default function Database() {
 
                             {activeTab === 'monitoring' && (
                                 <div className="h-full overflow-y-auto p-6">
+                                    {/* Real-time status indicator */}
+                                    <div className="mb-4 flex items-center justify-between">
+                                        <div className="flex items-center space-x-2">
+                                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                            <span className="text-sm text-gray-600">Real-time monitoring active (updates every 5s)</span>
+                                        </div>
+                                        <div className="text-xs text-gray-500">
+                                            Last updated: {new Date().toLocaleTimeString()}
+                                        </div>
+                                    </div>
+
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                         {/* Health Status */}
                                         <div className="bg-white rounded-lg shadow">
                                             <div className="px-6 py-4 border-b border-gray-200">
-                                                <h3 className="text-lg font-medium text-gray-900">Database Health</h3>
+                                                <div className="flex items-center justify-between">
+                                                    <h3 className="text-lg font-medium text-gray-900">Database Health</h3>
+                                                    {loading && <div className="w-4 h-4 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"></div>}
+                                                </div>
                                             </div>
                                             <div className="p-6">
                                                 {health ? (
                                                     <div>
-                                                        <div className={`text-center mb-6 p-4 rounded-lg ${
-                                                            health.status === 'healthy' ? 'bg-green-50 text-green-800' :
+                                                        <div className={`text-center mb-6 p-4 rounded-lg transition-all duration-500 ${health.status === 'healthy' ? 'bg-green-50 text-green-800' :
                                                             health.status === 'warning' ? 'bg-yellow-50 text-yellow-800' :
-                                                            'bg-red-50 text-red-800'
-                                                        }`}>
+                                                                'bg-red-50 text-red-800'
+                                                            }`}>
                                                             <div className="text-3xl font-bold">{health.score}%</div>
                                                             <div className="text-sm uppercase font-medium">{health.status}</div>
                                                         </div>
-                                                        <div className="space-y-3">
+                                                        <div className="space-y-3 max-h-64 overflow-y-auto">
                                                             {health.checks.map((check, index) => (
-                                                                <div key={index} className="flex items-center justify-between">
+                                                                <div key={index} className="flex items-center justify-between p-2 rounded hover:bg-gray-50 transition-colors">
                                                                     <div className="flex items-center space-x-2">
-                                                                        <span className={`w-2 h-2 rounded-full ${
-                                                                            check.status === 'pass' ? 'bg-green-500' :
-                                                                            check.status === 'warning' ? 'bg-yellow-500' :
-                                                                            'bg-red-500'
-                                                                        }`}></span>
+                                                                        <span className={`w-2 h-2 rounded-full ${check.status === 'pass' ? 'bg-green-500 animate-pulse' :
+                                                                            check.status === 'warning' ? 'bg-yellow-500 animate-pulse' :
+                                                                                'bg-red-500 animate-pulse'
+                                                                            }`}></span>
                                                                         <span className="text-sm font-medium">{check.name}</span>
                                                                     </div>
-                                                                    <span className="text-sm text-gray-500">{check.value}</span>
+                                                                    <span className="text-sm text-gray-500 font-mono">{check.value}</span>
                                                                 </div>
                                                             ))}
                                                         </div>
                                                     </div>
                                                 ) : (
-                                                    <div className="text-center py-4 text-gray-500">Loading health status...</div>
+                                                    <div className="text-center py-8">
+                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                                                        <p className="mt-2 text-sm text-gray-500">Loading health status...</p>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>
@@ -547,38 +646,62 @@ export default function Database() {
                                         {/* Metrics */}
                                         <div className="bg-white rounded-lg shadow">
                                             <div className="px-6 py-4 border-b border-gray-200">
-                                                <h3 className="text-lg font-medium text-gray-900">Performance Metrics</h3>
+                                                <div className="flex items-center justify-between">
+                                                    <h3 className="text-lg font-medium text-gray-900">Performance Metrics</h3>
+                                                    {loading && <div className="w-4 h-4 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"></div>}
+                                                </div>
                                             </div>
                                             <div className="p-6">
                                                 {metrics ? (
                                                     <div className="grid grid-cols-2 gap-4">
-                                                        <div className="text-center">
-                                                            <div className="text-2xl font-bold text-gray-900">{metrics.activeConnections}</div>
-                                                            <div className="text-sm text-gray-500">Active Connections</div>
+                                                        <div className="text-center p-3 bg-blue-50 rounded-lg transition-all duration-300 hover:bg-blue-100">
+                                                            <div className="text-2xl font-bold text-blue-900">{metrics.activeConnections}</div>
+                                                            <div className="text-sm text-blue-700">Active Connections</div>
                                                         </div>
-                                                        <div className="text-center">
-                                                            <div className="text-2xl font-bold text-gray-900">{metrics.totalQueries}</div>
-                                                            <div className="text-sm text-gray-500">Total Queries</div>
+                                                        <div className="text-center p-3 bg-green-50 rounded-lg transition-all duration-300 hover:bg-green-100">
+                                                            <div className="text-2xl font-bold text-green-900">{metrics.totalQueries}</div>
+                                                            <div className="text-sm text-green-700">Total Queries</div>
                                                         </div>
-                                                        <div className="text-center">
-                                                            <div className="text-2xl font-bold text-gray-900">{metrics.avgQueryTime.toFixed(0)}ms</div>
-                                                            <div className="text-sm text-gray-500">Avg Query Time</div>
+                                                        <div className="text-center p-3 bg-purple-50 rounded-lg transition-all duration-300 hover:bg-purple-100">
+                                                            <div className="text-2xl font-bold text-purple-900">{metrics.avgQueryTime.toFixed(0)}ms</div>
+                                                            <div className="text-sm text-purple-700">Avg Query Time</div>
                                                         </div>
-                                                        <div className="text-center">
-                                                            <div className="text-2xl font-bold text-gray-900">{metrics.uptime}</div>
-                                                            <div className="text-sm text-gray-500">Uptime</div>
+                                                        <div className="text-center p-3 bg-indigo-50 rounded-lg transition-all duration-300 hover:bg-indigo-100">
+                                                            <div className="text-2xl font-bold text-indigo-900">{metrics.uptime}</div>
+                                                            <div className="text-sm text-indigo-700">Uptime</div>
                                                         </div>
-                                                        <div className="text-center">
-                                                            <div className="text-2xl font-bold text-gray-900">{metrics.memoryUsage.toFixed(1)}%</div>
-                                                            <div className="text-sm text-gray-500">Memory Usage</div>
+                                                        <div className={`text-center p-3 rounded-lg transition-all duration-300 ${metrics.memoryUsage > 80 ? 'bg-red-50 hover:bg-red-100' :
+                                                                metrics.memoryUsage > 60 ? 'bg-yellow-50 hover:bg-yellow-100' :
+                                                                    'bg-green-50 hover:bg-green-100'
+                                                            }`}>
+                                                            <div className={`text-2xl font-bold ${metrics.memoryUsage > 80 ? 'text-red-900' :
+                                                                    metrics.memoryUsage > 60 ? 'text-yellow-900' :
+                                                                        'text-green-900'
+                                                                }`}>{metrics.memoryUsage.toFixed(1)}%</div>
+                                                            <div className={`text-sm ${metrics.memoryUsage > 80 ? 'text-red-700' :
+                                                                    metrics.memoryUsage > 60 ? 'text-yellow-700' :
+                                                                        'text-green-700'
+                                                                }`}>Memory Usage</div>
                                                         </div>
-                                                        <div className="text-center">
-                                                            <div className="text-2xl font-bold text-gray-900">{metrics.cacheHitRatio.toFixed(1)}%</div>
-                                                            <div className="text-sm text-gray-500">Cache Hit Ratio</div>
+                                                        <div className={`text-center p-3 rounded-lg transition-all duration-300 ${metrics.cacheHitRatio > 80 ? 'bg-green-50 hover:bg-green-100' :
+                                                                metrics.cacheHitRatio > 60 ? 'bg-yellow-50 hover:bg-yellow-100' :
+                                                                    'bg-red-50 hover:bg-red-100'
+                                                            }`}>
+                                                            <div className={`text-2xl font-bold ${metrics.cacheHitRatio > 80 ? 'text-green-900' :
+                                                                    metrics.cacheHitRatio > 60 ? 'text-yellow-900' :
+                                                                        'text-red-900'
+                                                                }`}>{metrics.cacheHitRatio.toFixed(1)}%</div>
+                                                            <div className={`text-sm ${metrics.cacheHitRatio > 80 ? 'text-green-700' :
+                                                                    metrics.cacheHitRatio > 60 ? 'text-yellow-700' :
+                                                                        'text-red-700'
+                                                                }`}>Cache Hit Ratio</div>
                                                         </div>
                                                     </div>
                                                 ) : (
-                                                    <div className="text-center py-4 text-gray-500">Loading metrics...</div>
+                                                    <div className="text-center py-8">
+                                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                                                        <p className="mt-2 text-sm text-gray-500">Loading metrics...</p>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>
@@ -587,28 +710,36 @@ export default function Database() {
                                     {/* Query History */}
                                     <div className="mt-6 bg-white rounded-lg shadow">
                                         <div className="px-6 py-4 border-b border-gray-200">
-                                            <h3 className="text-lg font-medium text-gray-900">Recent Query History</h3>
+                                            <div className="flex items-center justify-between">
+                                                <h3 className="text-lg font-medium text-gray-900">Recent Query History</h3>
+                                                <span className="text-sm text-gray-500">Latest {Math.min(queryHistory.length, 10)} queries</span>
+                                            </div>
                                         </div>
-                                        <div className="overflow-x-auto">
+                                        <div className="max-h-80 overflow-auto">
                                             <table className="min-w-full divide-y divide-gray-200">
-                                                <thead className="bg-gray-50">
+                                                <thead className="bg-gray-50 sticky top-0 z-10">
                                                     <tr>
-                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Query</th>
-                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Execution Time</th>
-                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rows</th>
-                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Query</th>
+                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Execution Time</th>
+                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Rows</th>
+                                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Timestamp</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="bg-white divide-y divide-gray-200">
-                                                    {queryHistory.slice(0, 10).map((query, index) => (
-                                                        <tr key={index} className="hover:bg-gray-50">
+                                                    {queryHistory.length > 0 ? queryHistory.slice(0, 10).map((query, index) => (
+                                                        <tr key={index} className="hover:bg-gray-50 transition-colors">
                                                             <td className="px-6 py-4">
-                                                                <div className="text-sm text-gray-900 font-mono max-w-xs truncate">
+                                                                <div className="text-sm text-gray-900 font-mono max-w-xs truncate" title={query.query}>
                                                                     {query.query}
                                                                 </div>
                                                             </td>
                                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                                {query.executionTime}ms
+                                                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${query.executionTime < 100 ? 'bg-green-100 text-green-800' :
+                                                                        query.executionTime < 1000 ? 'bg-yellow-100 text-yellow-800' :
+                                                                            'bg-red-100 text-red-800'
+                                                                    }`}>
+                                                                    {query.executionTime}ms
+                                                                </span>
                                                             </td>
                                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                                                 {query.rowsAffected}
@@ -617,7 +748,13 @@ export default function Database() {
                                                                 {formatDate(query.timestamp)}
                                                             </td>
                                                         </tr>
-                                                    ))}
+                                                    )) : (
+                                                        <tr>
+                                                            <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-500">
+                                                                No query history available
+                                                            </td>
+                                                        </tr>
+                                                    )}
                                                 </tbody>
                                             </table>
                                             {queryHistory.length === 0 && (
