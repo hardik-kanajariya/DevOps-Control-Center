@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         getLogs: secureInvoke('servers:get-logs', ([serverId, lines]) =>
             validators.isValidId(serverId) && (lines === undefined || validators.isNumber(lines))),
         testConnection: secureInvoke('servers:test-connection', ([serverData]) => validators.isObject(serverData)),
+        directDeploy: secureInvoke('servers:direct-deploy', ([payload]) => validators.isObject(payload)),
     },
 
     // Deployment methods
@@ -212,8 +213,15 @@ export interface ElectronAPI {
     servers: {
         list: () => Promise<IPCResponse>;
         add: (server: any) => Promise<IPCResponse>;
+        update: (serverId: string, updates: any) => Promise<IPCResponse>;
+        delete: (serverId: string) => Promise<IPCResponse>;
         connect: (serverId: string) => Promise<IPCResponse>;
         disconnect: (serverId: string) => Promise<IPCResponse>;
+        executeCommand: (serverId: string, command: string) => Promise<IPCResponse>;
+        getStats: (serverId: string) => Promise<IPCResponse>;
+        getLogs: (serverId: string, lines?: number) => Promise<IPCResponse>;
+        testConnection: (server: any) => Promise<IPCResponse>;
+        directDeploy: (payload: any) => Promise<IPCResponse>;
     };
     deploy: {
         create: (config: any) => Promise<IPCResponse>;

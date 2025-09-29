@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { BrowserWindow, ipcMain } from 'electron';
 import { AuthService } from '../services/auth';
 import { GitHubService } from '../services/github';
 import { DashboardService } from '../services/dashboard';
@@ -6,7 +6,14 @@ import { RepositoryService } from '../services/repository';
 import { WorkflowService } from '../services/workflow';
 import { DatabaseManagementService } from '../services/databaseManagement';
 import { serverManagementService } from '../services/serverManagement';
-import { IPCResponse, VPSServer } from '../../shared/types';
+import {
+    DirectDeploymentRequest,
+    DirectDeploymentResult,
+    IPCResponse,
+    ServerStats,
+    ServerStatusPayload,
+    VPSServer
+} from '../../shared/types';
 
 export function registerIPCHandlers(): void {
     // Authentication handlers
@@ -413,6 +420,51 @@ export function registerIPCHandlers(): void {
         } catch (error) {
             return { success: false, error: (error as Error).message };
         }
+    });
+
+    ipcMain.handle('servers:direct-deploy', async (_, payload: DirectDeploymentRequest): Promise<IPCResponse<DirectDeploymentResult>> => {
+        try {
+            const result = await serverManagementService.directDeploy(payload);
+            if (result.success) {
+                return { success: true, data: result };
+            }
+            return { success: false, data: result, error: result.error };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    const broadcast = (channel: string, payload: any) => {
+        BrowserWindow.getAllWindows().forEach(window => {
+            window.webContents.send(channel, payload);
+        });
+    };
+
+    serverManagementService.on('server-status-changed', (payload: ServerStatusPayload) => {
+        broadcast('servers:status-changed', payload);
+    });
+
+    serverManagementService.on('server-stats', (payload: { serverId: string; stats: ServerStats }) => {
+        broadcast('servers:stats', {
+            ...payload,
+            receivedAt: new Date().toISOString()
+        });
+    });
+
+    serverManagementService.on('server-added', (server: VPSServer) => {
+        broadcast('servers:added', server);
+    });
+
+    serverManagementService.on('server-updated', (server: VPSServer) => {
+        broadcast('servers:updated', server);
+    });
+
+    serverManagementService.on('server-deleted', (serverId: string) => {
+        broadcast('servers:deleted', serverId);
+    });
+
+    serverManagementService.on('server-deployment-finished', (payload: DirectDeploymentResult) => {
+        broadcast('servers:deployment-finished', payload);
     });
 
     console.log('IPC handlers registered');

@@ -1,10 +1,17 @@
-import { VPSServer } from '../../shared/types';
+import {
+    VPSServer,
+    DirectDeploymentRequest,
+    DirectDeploymentResult,
+    DirectDeploymentStepResult,
+    ServerStats
+} from '../../shared/types';
 import { EventEmitter } from 'events';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { Client, ClientChannel, ConnectConfig } from 'ssh2';
 import * as crypto from 'crypto';
+import { AuthService } from './auth';
 
 export class ServerManagementService extends EventEmitter {
     private servers: Map<string, VPSServer> = new Map();
@@ -17,6 +24,58 @@ export class ServerManagementService extends EventEmitter {
         const appDataPath = path.join(os.homedir(), 'AppData', 'Roaming', 'devops-control-center');
         this.dbPath = path.join(appDataPath, 'servers.json');
         this.initializeService();
+    }
+
+    private shellQuote(value: string): string {
+        const stringValue = value ?? '';
+        return `'${stringValue.replace(/'/g, `'\''`)}'`;
+    }
+
+    private sanitizeTargetPath(targetPath: string): void {
+        if (!targetPath || targetPath.trim().length === 0) {
+            throw new Error('Deployment target path is required');
+        }
+
+        const normalized = path.posix.normalize(targetPath);
+        if (normalized === '/' || normalized === '.' || normalized === '..') {
+            throw new Error('Deployment target path is not allowed to be root or relative to root');
+        }
+
+        if (normalized.startsWith('..') || normalized.includes('/../')) {
+            throw new Error('Deployment target path cannot traverse parent directories');
+        }
+    }
+
+    private redactSensitive(text: string, secrets: string[]): string {
+        if (!text) {
+            return '';
+        }
+
+        let redacted = text;
+        secrets
+            .filter(secret => Boolean(secret))
+            .forEach(secret => {
+                if (!secret) return;
+                const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                redacted = redacted.replace(new RegExp(escaped, 'g'), '***');
+            });
+        return redacted;
+    }
+
+    private async ensureConnected(serverId: string): Promise<void> {
+        const server = this.servers.get(serverId);
+        if (!server) {
+            throw new Error('Server not found');
+        }
+
+        if (server.status === 'connected' && this.connections.has(serverId)) {
+            return;
+        }
+
+        const result = await this.connectToServer(serverId);
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to establish SSH connection');
+        }
     }
 
     private async initializeService(): Promise<void> {
@@ -263,13 +322,7 @@ export class ServerManagementService extends EventEmitter {
         });
     }
 
-    public async getServerStats(serverId: string): Promise<{
-        cpu: number;
-        memory: { used: number; total: number; percentage: number };
-        disk: { used: number; total: number; percentage: number };
-        uptime: number;
-        loadAverage: number[];
-    }> {
+    public async getServerStats(serverId: string): Promise<ServerStats> {
         try {
             const commands = {
                 cpu: "top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'",
@@ -287,13 +340,16 @@ export class ServerManagementService extends EventEmitter {
                 this.executeCommand(serverId, commands.loadavg)
             ]);
 
-            const cpu = parseFloat(results[0].stdout.trim()) || 0;
-            const [memUsed, memTotal, memPercent] = results[1].stdout.trim().split(' ').map(Number);
-            const [diskUsed, diskTotal, diskPercent] = results[2].stdout.trim().split(' ').map(Number);
+            const cpuCommand = results[0];
+            const memoryCommand = results[1];
+            const diskCommand = results[2];
+            const cpu = parseFloat(cpuCommand.stdout.trim()) || 0;
+            const [memUsed, memTotal, memPercent] = memoryCommand.stdout.trim().split(/\s+/).map(Number);
+            const [diskUsed, diskTotal, diskPercent] = diskCommand.stdout.trim().split(/\s+/).map(Number);
             const uptime = parseFloat(results[3].stdout.trim()) || 0;
             const loadAverage = results[4].stdout.trim().split(' ').map(Number);
 
-            return {
+            const stats: ServerStats = {
                 cpu: Math.round(cpu * 100) / 100,
                 memory: {
                     used: memUsed || 0,
@@ -308,6 +364,21 @@ export class ServerManagementService extends EventEmitter {
                 uptime: Math.round(uptime),
                 loadAverage: loadAverage.slice(0, 3) || [0, 0, 0]
             };
+
+            const server = this.servers.get(serverId);
+            if (server) {
+                server.cpu = stats.cpu;
+                server.memory = stats.memory.percentage;
+                server.disk = stats.disk.percentage;
+                server.uptimeSeconds = stats.uptime;
+                server.loadAverage = stats.loadAverage;
+                server.lastSeen = new Date();
+                this.servers.set(serverId, server);
+            }
+
+            this.emit('server-stats', { serverId, stats });
+
+            return stats;
         } catch (error) {
             console.error(`Error getting stats for server ${serverId}:`, error);
             return {
@@ -322,8 +393,7 @@ export class ServerManagementService extends EventEmitter {
 
     private async checkServerHealth(serverId: string): Promise<void> {
         try {
-            const stats = await this.getServerStats(serverId);
-            this.emit('server-stats', { serverId, stats });
+            await this.getServerStats(serverId);
         } catch (error) {
             console.error(`Health check failed for server ${serverId}:`, error);
             const server = this.servers.get(serverId);
@@ -389,6 +459,157 @@ export class ServerManagementService extends EventEmitter {
                 resolve({ success: false, error: 'No authentication method provided' });
             }
         });
+    }
+
+    public async directDeploy(request: DirectDeploymentRequest): Promise<DirectDeploymentResult> {
+        const {
+            serverId,
+            repository,
+            branch,
+            targetPath,
+            clean = false,
+            useGitHubPat = true,
+            preDeployScript,
+            postDeployScript,
+            environmentVariables = {}
+        } = request;
+
+        const server = this.servers.get(serverId);
+        if (!server) {
+            throw new Error('Server not found');
+        }
+
+        this.sanitizeTargetPath(targetPath);
+
+        await this.ensureConnected(serverId);
+
+        const secrets: string[] = [];
+        let authenticatedCloneUrl = repository.cloneUrl;
+
+        if (useGitHubPat) {
+            const token = await AuthService.getToken();
+            if (!token) {
+                throw new Error('GitHub personal access token is not configured. Please set it before deploying.');
+            }
+            secrets.push(token);
+            try {
+                const repoUrl = new URL(repository.cloneUrl);
+                repoUrl.username = 'x-access-token';
+                repoUrl.password = token;
+                authenticatedCloneUrl = repoUrl.toString();
+            } catch (error) {
+                throw new Error(`Invalid repository clone URL: ${(error as Error).message}`);
+            }
+        }
+
+        const invalidEnvKey = Object.keys(environmentVariables).find(key => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key));
+        if (invalidEnvKey) {
+            throw new Error(`Invalid environment variable key: ${invalidEnvKey}`);
+        }
+
+        const steps: DirectDeploymentStepResult[] = [];
+        const overallStart = new Date();
+
+        const runStep = async (name: string, command: string): Promise<void> => {
+            const startedAt = new Date();
+            const result = await this.executeCommand(serverId, command);
+            const finishedAt = new Date();
+
+            const step: DirectDeploymentStepResult = {
+                id: crypto.randomUUID(),
+                name,
+                command: this.redactSensitive(command, secrets),
+                stdout: this.redactSensitive(result.stdout, secrets),
+                stderr: this.redactSensitive(result.stderr, secrets),
+                code: result.code,
+                startedAt: startedAt.toISOString(),
+                finishedAt: finishedAt.toISOString(),
+                success: result.code === 0
+            };
+
+            steps.push(step);
+
+            if (result.code !== 0) {
+                throw new Error(step.stderr || `Step "${name}" failed with exit code ${result.code}`);
+            }
+        };
+
+        try {
+            if (clean) {
+                const cleanScript = `set -e\nTARGET=${this.shellQuote(targetPath)}\nif [ -d "$TARGET" ]; then\n  rm -rf "$TARGET"\nfi`;
+                await runStep('Clean target directory', `bash -lc ${this.shellQuote(cleanScript)}`);
+            }
+
+            const ensureDirScript = `set -e\nmkdir -p ${this.shellQuote(targetPath)}`;
+            await runStep('Ensure target directory', `bash -lc ${this.shellQuote(ensureDirScript)}`);
+
+            if (preDeployScript && preDeployScript.trim().length > 0) {
+                const preScript = `set -e\ncd ${this.shellQuote(targetPath)}\n${preDeployScript}`;
+                await runStep('Pre-deploy script', `bash -lc ${this.shellQuote(preScript)}`);
+            }
+
+            const envExports = Object.entries(environmentVariables)
+                .map(([key, value]) => `export ${key}=${this.shellQuote(value)}`)
+                .join('\n');
+
+            const deployScriptLines = [
+                'set -e',
+                envExports,
+                `TARGET=${this.shellQuote(targetPath)}`,
+                `BRANCH=${this.shellQuote(branch)}`,
+                `AUTH_URL=${this.shellQuote(authenticatedCloneUrl)}`,
+                `PLAIN_URL=${this.shellQuote(repository.cloneUrl)}`,
+                'if [ ! -d "$TARGET" ]; then',
+                '  mkdir -p "$TARGET"',
+                'fi',
+                'if [ -d "$TARGET/.git" ]; then',
+                '  git -C "$TARGET" fetch origin',
+                '  git -C "$TARGET" checkout "$BRANCH"',
+                '  git -C "$TARGET" reset --hard "origin/$BRANCH"',
+                'else',
+                '  git clone --branch "$BRANCH" "$AUTH_URL" "$TARGET"',
+                '  git -C "$TARGET" remote set-url origin "$PLAIN_URL"',
+                'fi'
+            ].filter(Boolean).join('\n');
+
+            await runStep('Synchronize repository', `bash -lc ${this.shellQuote(deployScriptLines)}`);
+
+            if (postDeployScript && postDeployScript.trim().length > 0) {
+                const postScript = `set -e\ncd ${this.shellQuote(targetPath)}\n${postDeployScript}`;
+                await runStep('Post-deploy script', `bash -lc ${this.shellQuote(postScript)}`);
+            }
+
+            const overallEnd = new Date();
+            const result: DirectDeploymentResult = {
+                success: true,
+                serverId,
+                repository,
+                branch,
+                targetPath,
+                steps,
+                startedAt: overallStart.toISOString(),
+                finishedAt: overallEnd.toISOString()
+            };
+
+            this.emit('server-deployment-finished', result);
+            return result;
+        } catch (error) {
+            const overallEnd = new Date();
+            const result: DirectDeploymentResult = {
+                success: false,
+                serverId,
+                repository,
+                branch,
+                targetPath,
+                steps,
+                startedAt: overallStart.toISOString(),
+                finishedAt: overallEnd.toISOString(),
+                error: (error as Error).message
+            };
+
+            this.emit('server-deployment-finished', result);
+            return result;
+        }
     }
 
     public cleanup(): void {

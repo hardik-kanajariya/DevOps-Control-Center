@@ -59,6 +59,77 @@ export interface VPSServer {
     cpu?: number;
     memory?: number;
     disk?: number;
+    uptimeSeconds?: number;
+    loadAverage?: number[];
+}
+
+export interface ServerResourceUsage {
+    used: number;
+    total: number;
+    percentage: number;
+}
+
+export interface ServerStats {
+    cpu: number;
+    memory: ServerResourceUsage;
+    disk: ServerResourceUsage;
+    uptime: number;
+    loadAverage: number[];
+}
+
+export interface ServerLogsPayload {
+    serverId: string;
+    logs: string;
+    lines: number;
+    fetchedAt: string;
+}
+
+export interface ServerStatusPayload {
+    serverId: string;
+    status: VPSServer['status'];
+}
+
+export interface DirectDeploymentRepository {
+    name: string;
+    fullName: string;
+    cloneUrl: string;
+    defaultBranch: string;
+}
+
+export interface DirectDeploymentRequest {
+    serverId: string;
+    repository: DirectDeploymentRepository;
+    branch: string;
+    targetPath: string;
+    clean?: boolean;
+    useGitHubPat?: boolean;
+    preDeployScript?: string;
+    postDeployScript?: string;
+    environmentVariables?: Record<string, string>;
+}
+
+export interface DirectDeploymentStepResult {
+    id: string;
+    name: string;
+    command: string;
+    stdout: string;
+    stderr: string;
+    code: number;
+    startedAt: string;
+    finishedAt: string;
+    success: boolean;
+}
+
+export interface DirectDeploymentResult {
+    success: boolean;
+    serverId: string;
+    repository: DirectDeploymentRepository;
+    branch: string;
+    targetPath: string;
+    steps: DirectDeploymentStepResult[];
+    startedAt: string;
+    finishedAt: string;
+    error?: string;
 }
 
 export interface DeploymentConfig {
@@ -175,8 +246,15 @@ export type IPCChannels =
     | 'database:open-external'
     | 'servers:list'
     | 'servers:add'
+    | 'servers:update'
+    | 'servers:delete'
     | 'servers:connect'
     | 'servers:disconnect'
+    | 'servers:execute-command'
+    | 'servers:get-stats'
+    | 'servers:get-logs'
+    | 'servers:test-connection'
+    | 'servers:direct-deploy'
     | 'deploy:create'
     | 'deploy:run'
     | 'deploy:history'
