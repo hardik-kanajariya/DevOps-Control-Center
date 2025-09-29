@@ -1,126 +1,95 @@
-import { useState } from 'react';
-
-interface Server {
-    id: number;
-    name: string;
-    hostname: string;
-    ip: string;
-    port: number;
-    username: string;
-    environment: 'production' | 'staging' | 'development';
-    os: string;
-    status: 'online' | 'offline' | 'maintenance';
-    lastSeen: string;
-    cpu: number;
-    memory: number;
-    disk: number;
-    tags: string[];
-}
-
-// Mock server data
-const mockServers: Server[] = [
-    {
-        id: 1,
-        name: 'web-prod-01',
-        hostname: 'web-prod-01.company.com',
-        ip: '192.168.1.10',
-        port: 22,
-        username: 'deploy',
-        environment: 'production',
-        os: 'Ubuntu 22.04',
-        status: 'online',
-        lastSeen: '2024-08-14T11:30:00Z',
-        cpu: 45,
-        memory: 78,
-        disk: 65,
-        tags: ['web', 'nginx', 'docker']
-    },
-    {
-        id: 2,
-        name: 'api-staging',
-        hostname: 'api-staging.company.com',
-        ip: '192.168.1.20',
-        port: 22,
-        username: 'deploy',
-        environment: 'staging',
-        os: 'Ubuntu 22.04',
-        status: 'online',
-        lastSeen: '2024-08-14T11:25:00Z',
-        cpu: 23,
-        memory: 45,
-        disk: 32,
-        tags: ['api', 'nodejs', 'pm2']
-    },
-    {
-        id: 3,
-        name: 'db-prod-primary',
-        hostname: 'db-prod-primary.company.com',
-        ip: '192.168.1.30',
-        port: 22,
-        username: 'admin',
-        environment: 'production',
-        os: 'Ubuntu 20.04',
-        status: 'maintenance',
-        lastSeen: '2024-08-14T10:45:00Z',
-        cpu: 12,
-        memory: 89,
-        disk: 76,
-        tags: ['database', 'postgresql', 'primary']
-    }
-];
+import { useEffect, useState } from 'react';
+import { useAppSelector, useAppDispatch } from '../hooks/redux';
+import {
+    fetchServers,
+    addServer,
+    connectToServer,
+    disconnectFromServer
+} from '../store/slices/serversSlice';
+import { VPSServer } from '../../shared/types';
 
 export default function Servers() {
-    const [servers] = useState(mockServers);
-    const [selectedServer, setSelectedServer] = useState<Server | null>(null);
+    const dispatch = useAppDispatch();
+    const { servers, loading, error, connectingServers } = useAppSelector((state) => state.servers);
+
+    const [selectedServer, setSelectedServer] = useState<VPSServer | null>(null);
     const [showAddModal, setShowAddModal] = useState(false);
     const [showConnectModal, setShowConnectModal] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+
     const [newServer, setNewServer] = useState({
         name: '',
         hostname: '',
+        host: '',
         ip: '',
         port: 22,
         username: '',
-        environment: 'development' as Server['environment'],
+        password: '',
+        privateKeyPath: '',
+        environment: 'development' as VPSServer['environment'],
         tags: ''
     });
 
-    const handleSelectServer = (server: Server) => {
+    // Load servers on component mount
+    useEffect(() => {
+        dispatch(fetchServers());
+    }, [dispatch]);
+
+    const handleSelectServer = (server: VPSServer) => {
         setSelectedServer(server);
     };
 
-    const handleAddServer = () => {
-        // In real implementation, would add server via IPC
-        console.log('Adding server:', newServer);
-        setShowAddModal(false);
-        setNewServer({
-            name: '',
-            hostname: '',
-            ip: '',
-            port: 22,
-            username: '',
-            environment: 'development',
-            tags: ''
-        });
+    const handleAddServer = async () => {
+        const serverData: Omit<VPSServer, 'id' | 'status' | 'lastConnected' | 'lastSeen' | 'cpu' | 'memory' | 'disk'> = {
+            name: newServer.name,
+            hostname: newServer.hostname,
+            host: newServer.hostname,
+            ip: newServer.ip,
+            port: newServer.port,
+            username: newServer.username,
+            password: newServer.password || undefined,
+            privateKeyPath: newServer.privateKeyPath || undefined,
+            environment: newServer.environment,
+            os: 'Unknown',
+            tags: newServer.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
+        };
+
+        const result = await dispatch(addServer(serverData));
+        if (addServer.fulfilled.match(result)) {
+            setShowAddModal(false);
+            setNewServer({
+                name: '',
+                hostname: '',
+                host: '',
+                ip: '',
+                port: 22,
+                username: '',
+                password: '',
+                privateKeyPath: '',
+                environment: 'development',
+                tags: ''
+            });
+        }
     };
 
-    const handleConnectServer = () => {
+    const handleConnectServer = async () => {
         if (selectedServer) {
-            // In real implementation, would initiate SSH connection via IPC
-            console.log(`Connecting to ${selectedServer.hostname}:${selectedServer.port}`);
+            await dispatch(connectToServer(selectedServer.id));
             setShowConnectModal(false);
         }
     };
 
-    const getStatusColor = (status: Server['status']) => {
+    const getStatusColor = (status: VPSServer['status']) => {
         switch (status) {
-            case 'online': return 'bg-green-500';
-            case 'offline': return 'bg-red-500';
-            case 'maintenance': return 'bg-yellow-500';
+            case 'connected': return 'bg-green-500';
+            case 'disconnected': return 'bg-gray-500';
+            case 'connecting': return 'bg-blue-500';
+            case 'error': return 'bg-red-500';
             default: return 'bg-gray-500';
         }
     };
 
-    const getEnvironmentColor = (environment: Server['environment']) => {
+    const getEnvironmentColor = (environment: VPSServer['environment']) => {
         switch (environment) {
             case 'production': return 'bg-red-100 text-red-800';
             case 'staging': return 'bg-yellow-100 text-yellow-800';
@@ -129,8 +98,10 @@ export default function Servers() {
         }
     };
 
-    const formatLastSeen = (lastSeen: string) => {
-        const date = new Date(lastSeen);
+    const formatLastSeen = (lastConnected?: Date) => {
+        if (!lastConnected) return 'Never';
+
+        const date = new Date(lastConnected);
         const now = new Date();
         const diff = now.getTime() - date.getTime();
         const minutes = Math.floor(diff / (1000 * 60));
@@ -142,6 +113,12 @@ export default function Servers() {
         const days = Math.floor(hours / 24);
         return `${days}d ago`;
     };
+
+    const filteredServers = servers.filter(server =>
+        server.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        server.hostname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        server.ip.includes(searchTerm)
+    );
 
     return (
         <div className="flex h-full bg-gray-50">
@@ -161,6 +138,8 @@ export default function Servers() {
                         <input
                             type="text"
                             placeholder="Search servers..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
                             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         />
                         <svg className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -171,13 +150,13 @@ export default function Servers() {
 
                 <div className="flex-1 overflow-y-auto p-4">
                     <div className="space-y-2">
-                        {servers.map((server) => (
+                        {filteredServers.map((server) => (
                             <button
                                 key={server.id}
                                 onClick={() => handleSelectServer(server)}
                                 className={`w-full text-left p-4 rounded-lg border transition-colors ${selectedServer?.id === server.id
-                                        ? 'border-primary-500 bg-primary-50'
-                                        : 'border-gray-200 bg-white hover:bg-gray-50'
+                                    ? 'border-primary-500 bg-primary-50'
+                                    : 'border-gray-200 bg-white hover:bg-gray-50'
                                     }`}
                             >
                                 <div className="flex items-start justify-between mb-2">
@@ -232,19 +211,18 @@ export default function Servers() {
                                     <p className="text-gray-600 mb-2">{selectedServer.hostname}</p>
                                     <div className="flex items-center space-x-4 text-sm text-gray-500">
                                         <span>{selectedServer.ip}:{selectedServer.port}</span>
-                                        <span>{selectedServer.os}</span>
+                                        <span>{selectedServer.os || 'Unknown OS'}</span>
                                         <span>Last seen {formatLastSeen(selectedServer.lastSeen)}</span>
                                     </div>
                                 </div>
                                 <div className="flex space-x-2">
                                     <button
                                         onClick={() => setShowConnectModal(true)}
-                                        className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
+                                        disabled={selectedServer.status === 'connecting' || selectedServer.status === 'connected'}
+                                        className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                     >
-                                        Connect SSH
-                                    </button>
-                                    <button className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
-                                        Edit Server
+                                        {selectedServer.status === 'connecting' ? 'Connecting...' :
+                                            selectedServer.status === 'connected' ? 'Connected' : 'Connect SSH'}
                                     </button>
                                 </div>
                             </div>
@@ -261,36 +239,36 @@ export default function Servers() {
                                             <div>
                                                 <div className="flex justify-between text-sm mb-1">
                                                     <span className="text-gray-600">CPU Usage</span>
-                                                    <span className="font-medium">{selectedServer.cpu}%</span>
+                                                    <span className="font-medium">{selectedServer.cpu || 0}%</span>
                                                 </div>
                                                 <div className="w-full bg-gray-200 rounded-full h-2">
                                                     <div
-                                                        className={`h-2 rounded-full ${selectedServer.cpu > 80 ? 'bg-red-500' : selectedServer.cpu > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                                                        style={{ width: `${selectedServer.cpu}%` }}
+                                                        className={`h-2 rounded-full ${(selectedServer.cpu || 0) > 80 ? 'bg-red-500' : (selectedServer.cpu || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                                                        style={{ width: `${selectedServer.cpu || 0}%` }}
                                                     ></div>
                                                 </div>
                                             </div>
                                             <div>
                                                 <div className="flex justify-between text-sm mb-1">
                                                     <span className="text-gray-600">Memory Usage</span>
-                                                    <span className="font-medium">{selectedServer.memory}%</span>
+                                                    <span className="font-medium">{selectedServer.memory || 0}%</span>
                                                 </div>
                                                 <div className="w-full bg-gray-200 rounded-full h-2">
                                                     <div
-                                                        className={`h-2 rounded-full ${selectedServer.memory > 80 ? 'bg-red-500' : selectedServer.memory > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                                                        style={{ width: `${selectedServer.memory}%` }}
+                                                        className={`h-2 rounded-full ${(selectedServer.memory || 0) > 80 ? 'bg-red-500' : (selectedServer.memory || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                                                        style={{ width: `${selectedServer.memory || 0}%` }}
                                                     ></div>
                                                 </div>
                                             </div>
                                             <div>
                                                 <div className="flex justify-between text-sm mb-1">
                                                     <span className="text-gray-600">Disk Usage</span>
-                                                    <span className="font-medium">{selectedServer.disk}%</span>
+                                                    <span className="font-medium">{selectedServer.disk || 0}%</span>
                                                 </div>
                                                 <div className="w-full bg-gray-200 rounded-full h-2">
                                                     <div
-                                                        className={`h-2 rounded-full ${selectedServer.disk > 80 ? 'bg-red-500' : selectedServer.disk > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                                                        style={{ width: `${selectedServer.disk}%` }}
+                                                        className={`h-2 rounded-full ${(selectedServer.disk || 0) > 80 ? 'bg-red-500' : (selectedServer.disk || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                                                        style={{ width: `${selectedServer.disk || 0}%` }}
                                                     ></div>
                                                 </div>
                                             </div>
@@ -318,7 +296,7 @@ export default function Servers() {
                                             </div>
                                             <div className="flex justify-between">
                                                 <span className="text-sm text-gray-500">Operating System:</span>
-                                                <span className="text-sm font-medium">{selectedServer.os}</span>
+                                                <span className="text-sm font-medium">{selectedServer.os || 'Unknown'}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -331,7 +309,8 @@ export default function Servers() {
                                         <div className="space-y-3">
                                             <button
                                                 onClick={() => setShowConnectModal(true)}
-                                                className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-primary-300 hover:bg-primary-50 transition-colors"
+                                                disabled={selectedServer.status === 'connecting' || selectedServer.status === 'connected'}
+                                                className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-primary-300 hover:bg-primary-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                             >
                                                 <div className="flex items-center">
                                                     <svg className="w-5 h-5 text-primary-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -347,24 +326,6 @@ export default function Servers() {
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                                                     </svg>
                                                     <span className="text-sm font-medium">Deploy to Server</span>
-                                                </div>
-                                            </button>
-
-                                            <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-primary-300 hover:bg-primary-50 transition-colors">
-                                                <div className="flex items-center">
-                                                    <svg className="w-5 h-5 text-primary-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                                    </svg>
-                                                    <span className="text-sm font-medium">View Logs</span>
-                                                </div>
-                                            </button>
-
-                                            <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-primary-300 hover:bg-primary-50 transition-colors">
-                                                <div className="flex items-center">
-                                                    <svg className="w-5 h-5 text-primary-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                                    </svg>
-                                                    <span className="text-sm font-medium">Restart Services</span>
                                                 </div>
                                             </button>
                                         </div>
@@ -420,7 +381,7 @@ export default function Servers() {
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Environment</label>
                                     <select
                                         value={newServer.environment}
-                                        onChange={(e) => setNewServer({ ...newServer, environment: e.target.value as Server['environment'] })}
+                                        onChange={(e) => setNewServer({ ...newServer, environment: e.target.value as VPSServer['environment'] })}
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                     >
                                         <option value="development">Development</option>
@@ -455,7 +416,7 @@ export default function Servers() {
                                     <input
                                         type="number"
                                         value={newServer.port}
-                                        onChange={(e) => setNewServer({ ...newServer, port: parseInt(e.target.value) })}
+                                        onChange={(e) => setNewServer({ ...newServer, port: parseInt(e.target.value) || 22 })}
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                     />
                                 </div>
@@ -533,7 +494,7 @@ export default function Servers() {
                                     </svg>
                                     <div>
                                         <p className="text-sm text-blue-800">
-                                            This will open a new SSH terminal window connected to the server.
+                                            This will establish an SSH connection to the server for management operations.
                                         </p>
                                     </div>
                                 </div>
@@ -548,9 +509,10 @@ export default function Servers() {
                             </button>
                             <button
                                 onClick={handleConnectServer}
-                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                                disabled={connectingServers.includes(selectedServer.id)}
+                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
-                                Connect SSH
+                                {connectingServers.includes(selectedServer.id) ? 'Connecting...' : 'Connect SSH'}
                             </button>
                         </div>
                     </div>

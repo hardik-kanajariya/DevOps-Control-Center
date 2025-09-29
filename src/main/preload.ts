@@ -65,8 +65,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     servers: {
         list: secureInvoke('servers:list'),
         add: secureInvoke('servers:add', ([server]) => validators.isObject(server)),
+        update: secureInvoke('servers:update', ([serverId, updates]) =>
+            validators.isValidId(serverId) && validators.isObject(updates)),
+        delete: secureInvoke('servers:delete', ([serverId]) => validators.isValidId(serverId)),
         connect: secureInvoke('servers:connect', ([serverId]) => validators.isValidId(serverId)),
         disconnect: secureInvoke('servers:disconnect', ([serverId]) => validators.isValidId(serverId)),
+        executeCommand: secureInvoke('servers:execute-command', ([serverId, command]) =>
+            validators.isValidId(serverId) && validators.isString(command)),
+        getStats: secureInvoke('servers:get-stats', ([serverId]) => validators.isValidId(serverId)),
+        getLogs: secureInvoke('servers:get-logs', ([serverId, lines]) =>
+            validators.isValidId(serverId) && (lines === undefined || validators.isNumber(lines))),
+        testConnection: secureInvoke('servers:test-connection', ([serverData]) => validators.isObject(serverData)),
     },
 
     // Deployment methods

@@ -5,7 +5,8 @@ import { DashboardService } from '../services/dashboard';
 import { RepositoryService } from '../services/repository';
 import { WorkflowService } from '../services/workflow';
 import { DatabaseManagementService } from '../services/databaseManagement';
-import { IPCResponse } from '../../shared/types';
+import { serverManagementService } from '../services/serverManagement';
+import { IPCResponse, VPSServer } from '../../shared/types';
 
 export function registerIPCHandlers(): void {
     // Authentication handlers
@@ -318,6 +319,97 @@ export function registerIPCHandlers(): void {
         try {
             const result = await DatabaseManagementService.getInstance().openDatabaseInExternal(connectionId);
             return result;
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    // Server Management handlers
+    ipcMain.handle('servers:list', async (): Promise<IPCResponse<VPSServer[]>> => {
+        try {
+            const servers = await serverManagementService.getServers();
+            return { success: true, data: servers };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:add', async (_, serverData: Omit<VPSServer, 'id' | 'status'>): Promise<IPCResponse<VPSServer>> => {
+        try {
+            const server = await serverManagementService.addServer(serverData);
+            return { success: true, data: server };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:update', async (_, serverId: string, updates: Partial<VPSServer>): Promise<IPCResponse<VPSServer>> => {
+        try {
+            const server = await serverManagementService.updateServer(serverId, updates);
+            return { success: true, data: server };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:delete', async (_, serverId: string): Promise<IPCResponse> => {
+        try {
+            await serverManagementService.deleteServer(serverId);
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:connect', async (_, serverId: string): Promise<IPCResponse> => {
+        try {
+            const result = await serverManagementService.connectToServer(serverId);
+            return result.success ? { success: true } : { success: false, error: result.error };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:disconnect', async (_, serverId: string): Promise<IPCResponse> => {
+        try {
+            await serverManagementService.disconnectFromServer(serverId);
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:execute-command', async (_, serverId: string, command: string): Promise<IPCResponse<{ stdout: string; stderr: string; code: number }>> => {
+        try {
+            const result = await serverManagementService.executeCommand(serverId, command);
+            return { success: true, data: result };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:get-stats', async (_, serverId: string): Promise<IPCResponse<any>> => {
+        try {
+            const stats = await serverManagementService.getServerStats(serverId);
+            return { success: true, data: stats };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:get-logs', async (_, serverId: string, lines?: number): Promise<IPCResponse<string>> => {
+        try {
+            const logs = await serverManagementService.getServerLogs(serverId, lines);
+            return { success: true, data: logs };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:test-connection', async (_, serverData: Omit<VPSServer, 'id' | 'status'>): Promise<IPCResponse> => {
+        try {
+            const result = await serverManagementService.testConnection(serverData);
+            return result.success ? { success: true } : { success: false, error: result.error };
         } catch (error) {
             return { success: false, error: (error as Error).message };
         }

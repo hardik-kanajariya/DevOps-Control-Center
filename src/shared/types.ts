@@ -44,13 +44,21 @@ export interface VPSServer {
     id: string;
     name: string;
     host: string;
+    hostname: string;
+    ip: string;
     port: number;
     username: string;
     privateKeyPath?: string;
     password?: string;
     status: 'connected' | 'disconnected' | 'connecting' | 'error';
+    environment: 'development' | 'staging' | 'production';
+    os?: string;
     lastConnected?: Date;
+    lastSeen?: Date;
     tags: string[];
+    cpu?: number;
+    memory?: number;
+    disk?: number;
 }
 
 export interface DeploymentConfig {

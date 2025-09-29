@@ -41,7 +41,7 @@ export class ServerManagementService extends EventEmitter {
         try {
             const data = await fs.readFile(this.dbPath, 'utf-8');
             const serversArray: VPSServer[] = JSON.parse(data);
-            
+
             this.servers.clear();
             serversArray.forEach(server => {
                 // Set initial status as disconnected
@@ -148,8 +148,8 @@ export class ServerManagementService extends EventEmitter {
             this.emit('server-status-changed', { serverId, status: 'connecting' });
 
             const client = new Client();
-            
-            return new Promise((resolve) => {
+
+            return new Promise(async (resolve) => {
                 client.on('ready', async () => {
                     this.connections.set(serverId, client);
                     server.status = 'connected';

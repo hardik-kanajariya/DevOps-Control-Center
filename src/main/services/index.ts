@@ -6,6 +6,7 @@ import { DashboardService } from './dashboard';
 import { RepositoryService } from './repository';
 import { WorkflowService } from './workflow';
 import { DatabaseManagementService } from './databaseManagement';
+import { serverManagementService } from './serverManagement';
 
 export async function initializeServices(): Promise<void> {
     try {
@@ -21,6 +22,9 @@ export async function initializeServices(): Promise<void> {
         RepositoryService.initialize();
         WorkflowService.initialize();
         DatabaseManagementService.initialize();
+
+        // Server management service is automatically initialized via constructor
+        console.log('ServerManagementService initialized');
 
         console.log('All services initialized successfully');
     } catch (error) {
