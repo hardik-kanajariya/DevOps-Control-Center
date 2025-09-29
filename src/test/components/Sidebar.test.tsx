@@ -78,6 +78,7 @@ describe('Sidebar', () => {
         // Text should be visible in expanded state
         expect(screen.getByText('DevOps')).toBeInTheDocument();
         expect(screen.getByText('Control Center')).toBeInTheDocument();
+        expect(screen.getByLabelText('Collapse sidebar')).toBeInTheDocument();
     });
 
     it('should show tooltips in collapsed state', () => {
@@ -89,6 +90,7 @@ describe('Sidebar', () => {
 
         const repositoriesButton = screen.getByLabelText('Repositories');
         expect(repositoriesButton).toHaveAttribute('title', 'Repositories');
+        expect(screen.getByLabelText('Expand sidebar')).toBeInTheDocument();
     });
 
     it('should not show tooltips in expanded state', () => {
@@ -109,5 +111,12 @@ describe('Sidebar', () => {
         const repositoriesButton = screen.getByLabelText('Repositories');
         expect(repositoriesButton).not.toHaveClass('bg-primary-100');
         expect(repositoriesButton).toHaveClass('text-gray-600');
+    });
+
+    it('should call onToggleCollapse when toggle button is clicked', () => {
+        render(<Sidebar {...defaultProps} />);
+
+        fireEvent.click(screen.getByLabelText('Collapse sidebar'));
+        expect(mockOnToggleCollapse).toHaveBeenCalledTimes(1);
     });
 });

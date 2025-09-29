@@ -20,6 +20,3 @@ export const store = configureStore({
 
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
-
-// Debug: Log the store state shape
-console.log('Store initialized with state:', store.getState());
