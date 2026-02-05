@@ -260,6 +260,9 @@ export class ServerManagementService extends EventEmitter {
                         resolve({ success: false, error: `Failed to read private key: ${keyError}` });
                         return;
                     }
+                } else if (server.privateKey) {
+                    connectConfig.privateKey = server.privateKey;
+                    client.connect(connectConfig);
                 } else if (server.password) {
                     connectConfig.password = server.password;
                     client.connect(connectConfig);
@@ -454,6 +457,9 @@ export class ServerManagementService extends EventEmitter {
                         clearTimeout(timeout);
                         resolve({ success: false, error: `Failed to read private key: ${keyError}` });
                     });
+            } else if (serverData.privateKey) {
+                connectConfig.privateKey = serverData.privateKey;
+                client.connect(connectConfig);
             } else if (serverData.password) {
                 connectConfig.password = serverData.password;
                 client.connect(connectConfig);
@@ -498,7 +504,7 @@ export class ServerManagementService extends EventEmitter {
                 success: true,
                 host: server.host,
                 username: server.username,
-                authenticationType: server.privateKeyPath ? 'key' : 'password',
+                authenticationType: (server.privateKeyPath || server.privateKey) ? 'key' : 'password',
                 osInfo: osInfo.stdout.trim() || undefined,
                 kernelVersion: kernelInfo.stdout.trim() || undefined,
                 homeDirectory: homeDir.stdout.trim() || undefined,
@@ -510,7 +516,7 @@ export class ServerManagementService extends EventEmitter {
                 success: false,
                 host: server.host,
                 username: server.username,
-                authenticationType: server.privateKeyPath ? 'key' : 'password',
+                authenticationType: (server.privateKeyPath || server.privateKey) ? 'key' : 'password',
                 error: (error as Error).message,
                 connectionTime: Date.now() - startTime
             };

@@ -58,7 +58,7 @@ export default function Workflows() {
     useEffect(() => {
         if (selectedWorkflow && selectedWorkflow.workflow_id && !workflowYAML) {
             // Extract owner/repo from workflow data
-            const repository = (selectedWorkflow as any).repository;
+            const repository = selectedWorkflow.repository;
             if (repository && repository.owner && repository.name) {
                 dispatch(fetchWorkflowYAML({
                     owner: repository.owner,
@@ -79,7 +79,7 @@ export default function Workflows() {
             filtered = filtered.filter(workflow =>
                 workflow.name.toLowerCase().includes(searchLower) ||
                 workflow.head_branch.toLowerCase().includes(searchLower) ||
-                (workflow as any).repository?.name?.toLowerCase().includes(searchLower)
+                workflow.repository?.name?.toLowerCase().includes(searchLower)
             );
         }
 
@@ -132,7 +132,7 @@ export default function Workflows() {
     const handleCancelWorkflow = async () => {
         if (!selectedWorkflow) return;
 
-        const repository = (selectedWorkflow as any).repository;
+        const repository = selectedWorkflow.repository;
         if (repository && repository.owner && repository.name) {
             await dispatch(cancelWorkflowRun({
                 owner: repository.owner,
@@ -147,7 +147,7 @@ export default function Workflows() {
     const handleRerunWorkflow = async () => {
         if (!selectedWorkflow) return;
 
-        const repository = (selectedWorkflow as any).repository;
+        const repository = selectedWorkflow.repository;
         if (repository && repository.owner && repository.name) {
             await dispatch(rerunWorkflow({
                 owner: repository.owner,
@@ -339,10 +339,10 @@ export default function Workflows() {
                                             </span>
                                         </div>
                                         <p className="text-sm text-gray-500 mt-1">
-                                            {(workflow as any).repository?.full_name || 'Unknown Repository'} • {workflow.head_branch}
+                                            {workflow.repository?.full_name || 'Unknown Repository'} • {workflow.head_branch}
                                         </p>
                                         <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
-                                            <span>#{(workflow as any).run_number || workflow.id}</span>
+                                            <span>#{workflow.run_number || workflow.id}</span>
                                             <span>{formatDate(workflow.created_at)}</span>
                                             {workflow.status === 'completed' && (
                                                 <span>{formatDuration(workflow.created_at, workflow.updated_at)}</span>
@@ -383,7 +383,7 @@ export default function Workflows() {
                                         </span>
                                     </div>
                                     <p className="text-gray-600 mb-4">
-                                        {(selectedWorkflow as any).repository?.full_name || 'Unknown Repository'} • Run #{(selectedWorkflow as any).run_number || selectedWorkflow.id}
+                                        {selectedWorkflow.repository?.full_name || 'Unknown Repository'} • Run #{selectedWorkflow.run_number || selectedWorkflow.id}
                                     </p>
                                     <div className="flex items-center space-x-6 text-sm text-gray-500">
                                         <div className="flex items-center space-x-1">

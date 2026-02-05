@@ -76,7 +76,13 @@ export class WorkflowService {
                         head_branch: run.head_branch || 'main',
                         created_at: run.created_at,
                         updated_at: run.updated_at,
-                        html_url: run.html_url
+                        html_url: run.html_url,
+                        run_number: run.run_number,
+                        repository: {
+                            owner: repo.owner.login,
+                            name: repo.name,
+                            full_name: repo.full_name
+                        }
                     }));
 
                     allWorkflowRuns.push(...formattedRuns);
@@ -131,7 +137,13 @@ export class WorkflowService {
                 head_branch: run.head_branch || 'main',
                 created_at: run.created_at,
                 updated_at: run.updated_at,
-                html_url: run.html_url
+                html_url: run.html_url,
+                run_number: run.run_number,
+                repository: {
+                    owner: owner,
+                    name: repo,
+                    full_name: `${owner}/${repo}`
+                }
             }));
 
             return formattedRuns;

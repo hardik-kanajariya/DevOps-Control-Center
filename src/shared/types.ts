@@ -49,6 +49,7 @@ export interface VPSServer {
     port: number;
     username: string;
     privateKeyPath?: string;
+    privateKey?: string;
     password?: string;
     status: 'connected' | 'disconnected' | 'connecting' | 'error';
     environment: 'development' | 'staging' | 'production';
@@ -218,6 +219,12 @@ export interface WorkflowRun {
     created_at: string;
     updated_at: string;
     html_url: string;
+    run_number?: number;
+    repository?: {
+        owner: string;
+        name: string;
+        full_name: string;
+    };
 }
 
 export interface AppSettings {

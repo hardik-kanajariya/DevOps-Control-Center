@@ -15,10 +15,22 @@ import {
     serverAdded,
     serverUpdated,
     serverDeleted,
-    serverDeploymentFinished
+    serverDeploymentFinished,
+    // SSH Key Management
+    generateSSHKey,
+    fetchSSHKeys,
+    deleteSSHKey,
+    // Enhanced Connection & Deploy
+    testConnectionDetailed,
+    uploadPublicKeyToServer,
+    detectDeployPaths,
+    // GitHub Deploy Keys
+    fetchDeployKeys,
+    addDeployKey,
+    deleteDeployKey
 } from '../store/slices/serversSlice';
 import { fetchRepositories } from '../store/slices/repositoriesSlice';
-import { DirectDeploymentRequest, DirectDeploymentResult, ServerStats, VPSServer } from '../../shared/types';
+import { DirectDeploymentRequest, DirectDeploymentResult, ServerStats, VPSServer, SuggestedDeployPath, GitHubDeployKey } from '../../shared/types';
 
 type EnvVarRow = { id: string; key: string; value: string };
 
@@ -32,6 +44,8 @@ const initialNewServerState = {
     username: '',
     password: '',
     privateKeyPath: '',
+    privateKey: '',
+    keyInputType: 'content' as 'path' | 'content',
     environment: 'development' as VPSServer['environment'],
     tags: '',
     authType: 'password' as 'password' | 'key'
@@ -172,7 +186,15 @@ export default function Servers() {
         stats: statsMap,
         logs: logsMap,
         commandOutputs,
-        deployments
+        deployments,
+        // SSH Key Management
+        sshKeys,
+        sshKeysLoading,
+        sshKeysError,
+        // Connection & Deploy enhancements
+        connectionTests,
+        // GitHub Deploy Keys
+        deployKeys
     } = useAppSelector((state) => state.servers);
     const repositoriesState = useAppSelector((state) => state.repositories);
 
@@ -181,10 +203,31 @@ export default function Servers() {
     const [showAddModal, setShowAddModal] = useState(false);
     const [showConnectModal, setShowConnectModal] = useState(false);
     const [showDeployModal, setShowDeployModal] = useState(false);
+    const [showSSHKeyModal, setShowSSHKeyModal] = useState(false);
+    const [showDeployKeyModal, setShowDeployKeyModal] = useState(false);
     const [logLines, setLogLines] = useState(DEFAULT_LOG_LINES);
     const [commandInput, setCommandInput] = useState('');
     const [isCommandRunning, setIsCommandRunning] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+
+    // SSH Key generation state
+    const [newKeyName, setNewKeyName] = useState('');
+    const [newKeyComment, setNewKeyComment] = useState('');
+    const [newKeyType, setNewKeyType] = useState<'rsa' | 'ed25519'>('ed25519');
+    const [isGeneratingKey, setIsGeneratingKey] = useState(false);
+    const [selectedKeyForUpload, setSelectedKeyForUpload] = useState<string | null>(null);
+    const [isUploadingKey, setIsUploadingKey] = useState(false);
+
+    // Deploy key state
+    const [newDeployKeyTitle, setNewDeployKeyTitle] = useState('');
+    const [newDeployKeyRepo, setNewDeployKeyRepo] = useState('');
+    const [newDeployKeyReadOnly, setNewDeployKeyReadOnly] = useState(true);
+    const [selectedKeyForDeploy, setSelectedKeyForDeploy] = useState<string | null>(null);
+    const [isAddingDeployKey, setIsAddingDeployKey] = useState(false);
+
+    // Path detection state
+    const [isDetectingPaths, setIsDetectingPaths] = useState(false);
+    const [detectedPaths, setDetectedPaths] = useState<SuggestedDeployPath[]>([]);
 
     const [newServer, setNewServer] = useState({ ...initialNewServerState });
     const [deployConfig, setDeployConfig] = useState({ ...initialDeployConfig });
@@ -198,6 +241,7 @@ export default function Servers() {
     const commandResult = selectedServerIdentifier ? commandOutputs[selectedServerIdentifier] : undefined;
     const deploymentInfo = selectedServerIdentifier ? deployments[selectedServerIdentifier] : undefined;
     const isDeploymentRunning = deploymentInfo?.status === 'running';
+    const connectionTestResult = selectedServerIdentifier ? connectionTests[selectedServerIdentifier] : undefined;
 
     const filteredServers = useMemo(() => {
         const query = searchTerm.trim().toLowerCase();
@@ -212,6 +256,7 @@ export default function Servers() {
 
     useEffect(() => {
         dispatch(fetchServers());
+        dispatch(fetchSSHKeys());
     }, [dispatch]);
 
     useEffect(() => {
@@ -330,15 +375,20 @@ export default function Servers() {
             return;
         }
 
+        const trimmedPrivateKey = newServer.privateKey?.trim();
+        const trimmedPrivateKeyPath = newServer.privateKeyPath?.trim();
+        const trimmedPassword = newServer.password?.trim();
+
         const serverData: Omit<VPSServer, 'id' | 'status'> = {
-            name: newServer.name,
+            name: newServer.name.trim(),
             host,
             hostname: newServer.hostname || host,
-            ip: newServer.ip,
+            ip: newServer.ip.trim(),
             port: newServer.port,
-            username: newServer.username,
-            password: newServer.authType === 'password' && newServer.password ? newServer.password : undefined,
-            privateKeyPath: newServer.authType === 'key' && newServer.privateKeyPath ? newServer.privateKeyPath : undefined,
+            username: newServer.username.trim(),
+            password: newServer.authType === 'password' && trimmedPassword ? trimmedPassword : undefined,
+            privateKeyPath: newServer.authType === 'key' && newServer.keyInputType === 'path' && trimmedPrivateKeyPath ? trimmedPrivateKeyPath : undefined,
+            privateKey: newServer.authType === 'key' && newServer.keyInputType === 'content' && trimmedPrivateKey ? trimmedPrivateKey : undefined,
             environment: newServer.environment,
             os: 'Unknown',
             tags: newServer.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
@@ -454,6 +504,117 @@ export default function Servers() {
         }
     };
 
+    // SSH Key Management handlers
+    const handleGenerateSSHKey = async () => {
+        if (!newKeyName.trim()) {
+            return;
+        }
+        setIsGeneratingKey(true);
+        try {
+            await dispatch(generateSSHKey({
+                name: newKeyName.trim(),
+                comment: newKeyComment.trim() || undefined,
+                type: newKeyType
+            }));
+            setNewKeyName('');
+            setNewKeyComment('');
+            setNewKeyType('ed25519');
+        } finally {
+            setIsGeneratingKey(false);
+        }
+    };
+
+    const handleDeleteSSHKey = async (keyName: string) => {
+        const confirmed = window.confirm(`Are you sure you want to delete the SSH key "${keyName}"?`);
+        if (!confirmed) {
+            return;
+        }
+        await dispatch(deleteSSHKey(keyName));
+    };
+
+    const handleUploadKeyToServer = async (keyName: string) => {
+        if (!selectedServerIdentifier) {
+            return;
+        }
+        const key = sshKeys.find(k => k.name === keyName);
+        if (!key) {
+            return;
+        }
+        setIsUploadingKey(true);
+        setSelectedKeyForUpload(keyName);
+        try {
+            await dispatch(uploadPublicKeyToServer({ serverId: selectedServerIdentifier, publicKey: key.publicKey }));
+        } finally {
+            setIsUploadingKey(false);
+            setSelectedKeyForUpload(null);
+        }
+    };
+
+    const handleDetectDeployPaths = async () => {
+        if (!selectedServerIdentifier) {
+            return;
+        }
+        setIsDetectingPaths(true);
+        try {
+            const result = await dispatch(detectDeployPaths(selectedServerIdentifier));
+            if (detectDeployPaths.fulfilled.match(result)) {
+                setDetectedPaths(result.payload.paths);
+            }
+        } finally {
+            setIsDetectingPaths(false);
+        }
+    };
+
+    const handleSelectDetectedPath = (path: SuggestedDeployPath) => {
+        setDeployConfig(prev => ({
+            ...prev,
+            targetPath: path.path
+        }));
+        setDetectedPaths([]);
+    };
+
+    const handleFetchDeployKeys = async (repoFullName: string) => {
+        if (!repoFullName) return;
+        await dispatch(fetchDeployKeys(repoFullName));
+    };
+
+    const handleAddDeployKey = async () => {
+        if (!selectedKeyForDeploy || !newDeployKeyRepo || !newDeployKeyTitle.trim()) {
+            return;
+        }
+        const selectedKey = sshKeys.find(k => k.name === selectedKeyForDeploy);
+        if (!selectedKey) return;
+
+        setIsAddingDeployKey(true);
+        try {
+            await dispatch(addDeployKey({
+                repoName: newDeployKeyRepo,
+                title: newDeployKeyTitle.trim(),
+                publicKey: selectedKey.publicKey,
+                readOnly: newDeployKeyReadOnly
+            }));
+            setNewDeployKeyTitle('');
+            setSelectedKeyForDeploy(null);
+            // Refresh deploy keys for this repo
+            await dispatch(fetchDeployKeys(newDeployKeyRepo));
+        } finally {
+            setIsAddingDeployKey(false);
+        }
+    };
+
+    const handleDeleteDeployKey = async (repoName: string, keyId: number) => {
+        const confirmed = window.confirm('Are you sure you want to remove this deploy key from the repository?');
+        if (!confirmed) return;
+
+        await dispatch(deleteDeployKey({ repoName, keyId }));
+        await dispatch(fetchDeployKeys(repoName));
+    };
+
+    const handleTestConnectionDetailed = async () => {
+        if (!selectedServerIdentifier) return;
+        await dispatch(testConnectionDetailed(selectedServerIdentifier));
+    };
+
     const cpuUsage = currentStats?.cpu ?? selectedServer?.cpu ?? 0;
     const memoryUsage = currentStats?.memory.percentage ?? selectedServer?.memory ?? 0;
     const diskUsage = currentStats?.disk.percentage ?? selectedServer?.disk ?? 0;
@@ -463,10 +624,12 @@ export default function Servers() {
     const loadAverageText = formatLoadAverage(currentStats?.loadAverage ?? selectedServer?.loadAverage);
 
     const canAddServer = Boolean(
-        newServer.name &&
-        newServer.hostname &&
-        newServer.username &&
-        (newServer.authType === 'password' ? newServer.password : newServer.privateKeyPath)
+        newServer.name.trim() &&
+        newServer.hostname.trim() &&
+        newServer.username.trim() &&
+        (newServer.authType === 'password' 
+            ? newServer.password?.trim() 
+            : (newServer.keyInputType === 'path' ? newServer.privateKeyPath?.trim() : newServer.privateKey?.trim()))
     );
 
     return (
@@ -706,6 +869,118 @@ export default function Servers() {
                                             </div>
                                         ) : (
                                             <p className="text-sm text-gray-500">No tags yet.</p>
+                                        )}
+                                    </div>
+
+                                    {/* SSH Key Management Card */}
+                                    <div className="card">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <h3 className="text-lg font-semibold text-gray-900">SSH Keys</h3>
+                                            <button
+                                                onClick={() => setShowSSHKeyModal(true)}
+                                                className="px-3 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors"
+                                            >
+                                                Manage Keys
+                                            </button>
+                                        </div>
+                                        {sshKeysLoading ? (
+                                            <p className="text-sm text-gray-500">Loading keys...</p>
+                                        ) : sshKeysError ? (
+                                            <p className="text-sm text-red-600">{sshKeysError}</p>
+                                        ) : sshKeys.length === 0 ? (
+                                            <p className="text-sm text-gray-500">No SSH keys found. Create one to enable passwordless server access.</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {sshKeys.slice(0, 3).map((key) => (
+                                                    <div key={key.name} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm font-medium text-gray-900 truncate">{key.name}</p>
+                                                            <p className="text-xs text-gray-500">{key.type.toUpperCase()} • {key.fingerprint?.slice(0, 20)}...</p>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => handleUploadKeyToServer(key.name)}
+                                                            disabled={!selectedServerIdentifier || isUploadingKey}
+                                                            className="ml-2 px-2 py-1 text-xs bg-primary-100 text-primary-700 rounded hover:bg-primary-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            title="Upload to selected server"
+                                                        >
+                                                            {isUploadingKey && selectedKeyForUpload === key.name ? 'Uploading...' : 'Upload'}
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                {sshKeys.length > 3 && (
+                                                    <button
+                                                        onClick={() => setShowSSHKeyModal(true)}
+                                                        className="text-sm text-primary-600 hover:text-primary-700"
+                                                    >
+                                                        View all {sshKeys.length} keys →
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Connection Test Card */}
+                                    <div className="card">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <h3 className="text-lg font-semibold text-gray-900">Connection Test</h3>
+                                            <button
+                                                onClick={handleTestConnectionDetailed}
+                                                disabled={!selectedServerIdentifier || connectionTestResult?.loading}
+                                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                                            >
+                                                {connectionTestResult?.loading ? 'Testing...' : 'Run Test'}
+                                            </button>
+                                        </div>
+                                        {connectionTestResult?.result ? (
+                                            <div className="space-y-3 text-sm">
+                                                <div className="flex items-center space-x-2">
+                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${connectionTestResult.result.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                        {connectionTestResult.result.success ? 'Connected' : 'Failed'}
+                                                    </span>
+                                                    {connectionTestResult.result.connectionTime !== undefined && (
+                                                        <span className="text-gray-500">Latency: {connectionTestResult.result.connectionTime}ms</span>
+                                                    )}
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-500">Host</span>
+                                                        <span className="font-medium text-gray-900">{connectionTestResult.result.host}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-500">User</span>
+                                                        <span className="font-medium text-gray-900">{connectionTestResult.result.username}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-gray-500">Auth Type</span>
+                                                        <span className="font-medium text-gray-900 capitalize">{connectionTestResult.result.authenticationType}</span>
+                                                    </div>
+                                                    {connectionTestResult.result.osInfo && (
+                                                        <div className="flex justify-between">
+                                                            <span className="text-gray-500">OS</span>
+                                                            <span className="font-medium text-gray-900">{connectionTestResult.result.osInfo}</span>
+                                                        </div>
+                                                    )}
+                                                    {connectionTestResult.result.kernelVersion && (
+                                                        <div className="flex justify-between">
+                                                            <span className="text-gray-500">Kernel</span>
+                                                            <span className="font-medium text-gray-900">{connectionTestResult.result.kernelVersion}</span>
+                                                        </div>
+                                                    )}
+                                                    {connectionTestResult.result.homeDirectory && (
+                                                        <div className="flex justify-between">
+                                                            <span className="text-gray-500">Home</span>
+                                                            <span className="font-medium text-gray-900 font-mono text-xs">{connectionTestResult.result.homeDirectory}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {connectionTestResult.result.error && (
+                                                    <p className="text-red-600">{connectionTestResult.result.error}</p>
+                                                )}
+                                            </div>
+                                        ) : connectionTestResult?.error ? (
+                                            <p className="text-sm text-red-600">{connectionTestResult.error}</p>
+                                        ) : (
+                                            <p className="text-sm text-gray-500">Run a test to check SSH connection details and server info.</p>
                                         )}
                                     </div>
                                 </div>
@@ -972,16 +1247,50 @@ export default function Servers() {
                                     />
                                 </div>
                             ) : (
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Private Key Path</label>
-                                    <input
-                                        type="text"
-                                        value={newServer.privateKeyPath}
-                                        onChange={(e) => setNewServer({ ...newServer, privateKeyPath: e.target.value })}
-                                        placeholder="C:\\Users\\you\\.ssh\\id_rsa"
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    />
-                                    <p className="mt-1 text-xs text-gray-500">Ensure the private key is accessible from this machine.</p>
+                                <div className="space-y-3">
+                                    <div className="flex items-center space-x-4">
+                                        <label className="inline-flex items-center space-x-2 text-sm text-gray-700">
+                                            <input
+                                                type="radio"
+                                                checked={newServer.keyInputType === 'content'}
+                                                onChange={() => setNewServer({ ...newServer, keyInputType: 'content' })}
+                                            />
+                                            <span>Paste Key Content</span>
+                                        </label>
+                                        <label className="inline-flex items-center space-x-2 text-sm text-gray-700">
+                                            <input
+                                                type="radio"
+                                                checked={newServer.keyInputType === 'path'}
+                                                onChange={() => setNewServer({ ...newServer, keyInputType: 'path' })}
+                                            />
+                                            <span>File Path</span>
+                                        </label>
+                                    </div>
+                                    {newServer.keyInputType === 'content' ? (
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Private Key</label>
+                                            <textarea
+                                                rows={6}
+                                                value={newServer.privateKey}
+                                                onChange={(e) => setNewServer({ ...newServer, privateKey: e.target.value })}
+                                                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            />
+                                            <p className="mt-1 text-xs text-gray-500">Paste your private key content directly. Supports OpenSSH and PEM formats.</p>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Private Key Path</label>
+                                            <input
+                                                type="text"
+                                                value={newServer.privateKeyPath}
+                                                onChange={(e) => setNewServer({ ...newServer, privateKeyPath: e.target.value })}
+                                                placeholder="C:\\Users\\you\\.ssh\\id_rsa"
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            />
+                                            <p className="mt-1 text-xs text-gray-500">Path to the private key file on this machine.</p>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             <div>
@@ -1119,7 +1428,17 @@ export default function Servers() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Deployment Path</label>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="block text-sm font-medium text-gray-700">Deployment Path</label>
+                                        <button
+                                            type="button"
+                                            onClick={handleDetectDeployPaths}
+                                            disabled={isDetectingPaths || selectedServerStatus !== 'connected'}
+                                            className="text-xs text-primary-600 hover:text-primary-700 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                        >
+                                            {isDetectingPaths ? 'Detecting...' : 'Auto-detect'}
+                                        </button>
+                                    </div>
                                     <input
                                         type="text"
                                         value={deployConfig.targetPath}
@@ -1127,6 +1446,23 @@ export default function Servers() {
                                         placeholder="/var/www/project"
                                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                                     />
+                                    {detectedPaths.length > 0 && (
+                                        <div className="mt-2 space-y-1">
+                                            <p className="text-xs text-gray-500">Suggested paths:</p>
+                                            {detectedPaths.map((p) => (
+                                                <button
+                                                    key={p.path}
+                                                    type="button"
+                                                    onClick={() => handleSelectDetectedPath(p)}
+                                                    className="block w-full text-left px-2 py-1 text-xs bg-gray-50 hover:bg-gray-100 rounded border border-gray-200"
+                                                >
+                                                    <span className="font-mono">{p.path}</span>
+                                                    <span className="text-gray-500 ml-2">({p.description})</span>
+                                                    {p.writable && <span className="text-green-600 ml-1">✓ writable</span>}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div className="flex items-center space-x-6">
@@ -1227,6 +1563,278 @@ export default function Servers() {
                                 className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 {isDeploymentRunning ? 'Deploying...' : 'Start Deployment'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* SSH Key Management Modal */}
+            {showSSHKeyModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
+                        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-900">SSH Key Management</h3>
+                                <p className="text-sm text-gray-500 mt-1">Generate and manage SSH keys for server authentication</p>
+                            </div>
+                            <button onClick={() => setShowSSHKeyModal(false)} className="text-gray-500 hover:text-gray-700">
+                                <span className="sr-only">Close</span>
+                                ✕
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                            {/* Generate New Key Section */}
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h4 className="font-medium text-gray-900 mb-4">Generate New SSH Key</h4>
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Key Name *</label>
+                                            <input
+                                                type="text"
+                                                value={newKeyName}
+                                                onChange={(e) => setNewKeyName(e.target.value)}
+                                                placeholder="my-server-key"
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Comment (optional)</label>
+                                            <input
+                                                type="text"
+                                                value={newKeyComment}
+                                                onChange={(e) => setNewKeyComment(e.target.value)}
+                                                placeholder="you@example.com or description"
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Key Type</label>
+                                        <select
+                                            value={newKeyType}
+                                            onChange={(e) => setNewKeyType(e.target.value as 'rsa' | 'ed25519')}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                        >
+                                            <option value="ed25519">Ed25519 (recommended)</option>
+                                            <option value="rsa">RSA</option>
+                                        </select>
+                                        <p className="mt-1 text-xs text-gray-500">Ed25519 is faster and more secure. RSA is more widely compatible.</p>
+                                    </div>
+                                    <button
+                                        onClick={handleGenerateSSHKey}
+                                        disabled={!newKeyName.trim() || isGeneratingKey}
+                                        className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        {isGeneratingKey ? 'Generating...' : 'Generate Key'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Existing Keys List */}
+                            <div>
+                                <h4 className="font-medium text-gray-900 mb-4">Your SSH Keys ({sshKeys.length})</h4>
+                                {sshKeysLoading ? (
+                                    <p className="text-sm text-gray-500">Loading keys...</p>
+                                ) : sshKeys.length === 0 ? (
+                                    <p className="text-sm text-gray-500">No SSH keys found. Generate one above to get started.</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {sshKeys.map((key) => (
+                                            <div key={key.name} className="border border-gray-200 rounded-lg p-4">
+                                                <div className="flex items-start justify-between">
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-medium text-gray-900">{key.name}</p>
+                                                        <p className="text-sm text-gray-500 mt-1">
+                                                            {key.type.toUpperCase()}
+                                                        </p>
+                                                        {key.fingerprint && (
+                                                            <p className="text-xs text-gray-400 mt-1 font-mono truncate">
+                                                                {key.fingerprint}
+                                                            </p>
+                                                        )}
+                                                        <p className="text-xs text-gray-400 mt-1">
+                                                            Created: {formatDateTime(key.createdAt)}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center space-x-2 ml-4">
+                                                        <button
+                                                            onClick={() => handleUploadKeyToServer(key.name)}
+                                                            disabled={!selectedServerIdentifier || isUploadingKey}
+                                                            title="Upload public key to selected server"
+                                                            className="px-3 py-1.5 text-xs bg-primary-100 text-primary-700 rounded hover:bg-primary-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            {isUploadingKey && selectedKeyForUpload === key.name ? 'Uploading...' : 'Upload to Server'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedKeyForDeploy(key.name);
+                                                                setShowDeployKeyModal(true);
+                                                            }}
+                                                            title="Add as GitHub deploy key"
+                                                            className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                                                        >
+                                                            Deploy Key
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteSSHKey(key.name)}
+                                                            title="Delete this key"
+                                                            className="px-3 py-1.5 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50"
+                                                        >
+                                                            Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {key.publicKey && (
+                                                    <div className="mt-3">
+                                                        <p className="text-xs font-medium text-gray-500 mb-1">Public Key</p>
+                                                        <div className="relative">
+                                                            <pre className="text-xs bg-gray-900 text-green-200 p-2 rounded overflow-x-auto whitespace-pre-wrap break-all">
+                                                                {key.publicKey}
+                                                            </pre>
+                                                            <button
+                                                                onClick={() => navigator.clipboard.writeText(key.publicKey)}
+                                                                className="absolute top-1 right-1 px-2 py-1 text-xs bg-gray-700 text-gray-200 rounded hover:bg-gray-600"
+                                                            >
+                                                                Copy
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="p-6 border-t border-gray-200 flex justify-end">
+                            <button
+                                onClick={() => setShowSSHKeyModal(false)}
+                                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* GitHub Deploy Key Modal */}
+            {showDeployKeyModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
+                        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-900">Add GitHub Deploy Key</h3>
+                                <p className="text-sm text-gray-500 mt-1">Grant repository access using an SSH key</p>
+                            </div>
+                            <button onClick={() => setShowDeployKeyModal(false)} className="text-gray-500 hover:text-gray-700">
+                                <span className="sr-only">Close</span>
+                                ✕
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">SSH Key</label>
+                                <select
+                                    value={selectedKeyForDeploy || ''}
+                                    onChange={(e) => setSelectedKeyForDeploy(e.target.value || null)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                >
+                                    <option value="">Select a key...</option>
+                                    {sshKeys.map((key) => (
+                                        <option key={key.name} value={key.name}>
+                                            {key.name} ({key.type.toUpperCase()})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Repository</label>
+                                <select
+                                    value={newDeployKeyRepo}
+                                    onChange={(e) => {
+                                        setNewDeployKeyRepo(e.target.value);
+                                        if (e.target.value) {
+                                            handleFetchDeployKeys(e.target.value);
+                                        }
+                                    }}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                >
+                                    <option value="">Select a repository...</option>
+                                    {repositoriesState.repositories.map((repo) => (
+                                        <option key={repo.id} value={repo.full_name}>
+                                            {repo.full_name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                                <input
+                                    type="text"
+                                    value={newDeployKeyTitle}
+                                    onChange={(e) => setNewDeployKeyTitle(e.target.value)}
+                                    placeholder="Production Server Key"
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                />
+                            </div>
+                            <div>
+                                <label className="inline-flex items-center space-x-2 text-sm text-gray-700">
+                                    <input
+                                        type="checkbox"
+                                        checked={newDeployKeyReadOnly}
+                                        onChange={(e) => setNewDeployKeyReadOnly(e.target.checked)}
+                                    />
+                                    <span>Read-only access (recommended)</span>
+                                </label>
+                                <p className="mt-1 text-xs text-gray-500">Read-only keys can clone and pull but not push.</p>
+                            </div>
+
+                            {/* Existing deploy keys for selected repo */}
+                            {newDeployKeyRepo && deployKeys[newDeployKeyRepo]?.keys && deployKeys[newDeployKeyRepo].keys.length > 0 && (
+                                <div className="border-t border-gray-200 pt-4">
+                                    <h4 className="text-sm font-medium text-gray-700 mb-2">Existing Deploy Keys</h4>
+                                    <div className="space-y-2">
+                                        {deployKeys[newDeployKeyRepo].keys.map((dk: GitHubDeployKey) => (
+                                            <div key={dk.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-900">{dk.title}</p>
+                                                    <p className="text-xs text-gray-500">
+                                                        {dk.read_only ? 'Read-only' : 'Read-write'} • Added {formatDateTime(dk.created_at)}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleDeleteDeployKey(newDeployKeyRepo, dk.id)}
+                                                    className="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50"
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-6 border-t border-gray-200 flex justify-end space-x-3">
+                            <button
+                                onClick={() => {
+                                    setShowDeployKeyModal(false);
+                                    setSelectedKeyForDeploy(null);
+                                    setNewDeployKeyTitle('');
+                                    setNewDeployKeyRepo('');
+                                }}
+                                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleAddDeployKey}
+                                disabled={!selectedKeyForDeploy || !newDeployKeyRepo || !newDeployKeyTitle.trim() || isAddingDeployKey}
+                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                {isAddingDeployKey ? 'Adding...' : 'Add Deploy Key'}
                             </button>
                         </div>
                     </div>

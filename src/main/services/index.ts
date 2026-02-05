@@ -7,6 +7,10 @@ import { RepositoryService } from './repository';
 import { WorkflowService } from './workflow';
 import { DatabaseManagementService } from './databaseManagement';
 import { serverManagementService } from './serverManagement';
+import { AutoUpdaterService } from './AutoUpdaterService';
+
+// Export auto updater service instance for use in main process
+export const autoUpdaterService = new AutoUpdaterService();
 
 export async function initializeServices(): Promise<void> {
     try {
@@ -25,6 +29,9 @@ export async function initializeServices(): Promise<void> {
 
         // Server management service is automatically initialized via constructor
         console.log('ServerManagementService initialized');
+
+        // Auto updater service is initialized via constructor (IPC handlers registered)
+        console.log('AutoUpdaterService initialized');
 
         console.log('All services initialized successfully');
     } catch (error) {
