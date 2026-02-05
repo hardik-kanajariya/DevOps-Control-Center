@@ -67,7 +67,41 @@ const mockDashboardStats = {
         update: vi.fn().mockResolvedValue(createSuccessResponse()),
         delete: vi.fn().mockResolvedValue(createSuccessResponse()),
         connect: vi.fn().mockResolvedValue(createSuccessResponse()),
-        disconnect: vi.fn().mockResolvedValue(createSuccessResponse())
+        disconnect: vi.fn().mockResolvedValue(createSuccessResponse()),
+        executeCommand: vi.fn().mockResolvedValue(createSuccessResponse({ stdout: '', stderr: '', code: 0 })),
+        getStats: vi.fn().mockResolvedValue(createSuccessResponse({})),
+        getLogs: vi.fn().mockResolvedValue(createSuccessResponse('')),
+        testConnection: vi.fn().mockResolvedValue(createSuccessResponse()),
+        testConnectionDetailed: vi.fn().mockResolvedValue(createSuccessResponse({
+            success: true,
+            host: 'example.com',
+            username: 'deploy',
+            authenticationType: 'key',
+            osInfo: 'Ubuntu 22.04'
+        })),
+        directDeploy: vi.fn().mockResolvedValue(createSuccessResponse()),
+        uploadPublicKey: vi.fn().mockResolvedValue(createSuccessResponse()),
+        detectDeployPaths: vi.fn().mockResolvedValue(createSuccessResponse([
+            { path: '/var/www/html', type: 'webroot', exists: true, writable: true, description: 'Apache default' }
+        ])),
+        setupPermissions: vi.fn().mockResolvedValue(createSuccessResponse()),
+        createGitHooks: vi.fn().mockResolvedValue(createSuccessResponse())
+    },
+    sshKeys: {
+        generate: vi.fn().mockResolvedValue(createSuccessResponse({
+            name: 'test-key',
+            type: 'ed25519',
+            privateKeyPath: '/path/to/key',
+            publicKeyPath: '/path/to/key.pub',
+            publicKey: 'ssh-ed25519 AAAA...',
+            fingerprint: 'SHA256:...',
+            createdAt: new Date().toISOString(),
+            hasPassphrase: false
+        })),
+        list: vi.fn().mockResolvedValue(createSuccessResponse([])),
+        get: vi.fn().mockResolvedValue(createSuccessResponse(null)),
+        delete: vi.fn().mockResolvedValue(createSuccessResponse()),
+        import: vi.fn().mockResolvedValue(createSuccessResponse())
     },
     workflows: {
         listAll: vi.fn().mockResolvedValue(createSuccessResponse([])),
@@ -85,7 +119,18 @@ const mockDashboardStats = {
         analytics: vi.fn().mockResolvedValue(createSuccessResponse({})),
         workflows: vi.fn().mockResolvedValue(createSuccessResponse([])),
         openBrowser: vi.fn().mockResolvedValue(createSuccessResponse()),
-        checkLocal: vi.fn().mockResolvedValue(createSuccessResponse(false))
+        checkLocal: vi.fn().mockResolvedValue(createSuccessResponse(false)),
+        addDeployKey: vi.fn().mockResolvedValue(createSuccessResponse({
+            id: 1,
+            key: 'ssh-ed25519 AAAA...',
+            url: 'https://api.github.com/repos/user/repo/keys/1',
+            title: 'Deploy Key',
+            verified: true,
+            created_at: new Date().toISOString(),
+            read_only: true
+        })),
+        listDeployKeys: vi.fn().mockResolvedValue(createSuccessResponse([])),
+        deleteDeployKey: vi.fn().mockResolvedValue(createSuccessResponse())
     },
     notifications: {
         show: vi.fn().mockResolvedValue(createSuccessResponse())

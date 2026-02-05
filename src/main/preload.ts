@@ -59,6 +59,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
         workflows: secureInvoke('repos:workflows', ([repoName]) => validators.isString(repoName)),
         openBrowser: secureInvoke('repos:open-browser', ([htmlUrl]) => validators.isString(htmlUrl)),
         checkLocal: secureInvoke('repos:check-local', ([localPath]) => validators.isString(localPath)),
+        addDeployKey: secureInvoke('repos:add-deploy-key', ([repoName, publicKey, title, readOnly]) =>
+            validators.isString(repoName) && validators.isString(publicKey) && validators.isString(title)
+        ),
+        listDeployKeys: secureInvoke('repos:list-deploy-keys', ([repoName]) => validators.isString(repoName)),
+        deleteDeployKey: secureInvoke('repos:delete-deploy-key', ([repoName, keyId]) =>
+            validators.isString(repoName) && validators.isNumber(keyId)
+        ),
     },
 
     // Server methods
@@ -76,7 +83,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
         getLogs: secureInvoke('servers:get-logs', ([serverId, lines]) =>
             validators.isValidId(serverId) && (lines === undefined || validators.isNumber(lines))),
         testConnection: secureInvoke('servers:test-connection', ([serverData]) => validators.isObject(serverData)),
+        testConnectionDetailed: secureInvoke('servers:test-connection-detailed', ([serverId]) => validators.isValidId(serverId)),
         directDeploy: secureInvoke('servers:direct-deploy', ([payload]) => validators.isObject(payload)),
+        uploadPublicKey: secureInvoke('servers:upload-public-key', ([serverId, publicKey]) =>
+            validators.isValidId(serverId) && validators.isString(publicKey)),
+        detectDeployPaths: secureInvoke('servers:detect-deploy-paths', ([serverId]) => validators.isValidId(serverId)),
+        setupPermissions: secureInvoke('servers:setup-permissions', ([serverId, targetPath, config]) =>
+            validators.isValidId(serverId) && validators.isString(targetPath) && validators.isObject(config)),
+        createGitHooks: secureInvoke('servers:create-git-hooks', ([serverId, repoPath, hooks]) =>
+            validators.isValidId(serverId) && validators.isString(repoPath) && Array.isArray(hooks)),
+    },
+
+    // SSH Key methods
+    sshKeys: {
+        generate: secureInvoke('ssh-keys:generate', ([options]) => validators.isObject(options)),
+        list: secureInvoke('ssh-keys:list'),
+        get: secureInvoke('ssh-keys:get', ([name]) => validators.isString(name)),
+        delete: secureInvoke('ssh-keys:delete', ([name]) => validators.isString(name)),
+        import: secureInvoke('ssh-keys:import', ([name, privateKeyPath]) =>
+            validators.isString(name) && validators.isString(privateKeyPath)),
     },
 
     // Deployment methods
@@ -209,6 +234,9 @@ export interface ElectronAPI {
         workflows: (repoName: string) => Promise<IPCResponse>;
         openBrowser: (htmlUrl: string) => Promise<IPCResponse>;
         checkLocal: (localPath: string) => Promise<IPCResponse>;
+        addDeployKey: (repoName: string, publicKey: string, title: string, readOnly?: boolean) => Promise<IPCResponse>;
+        listDeployKeys: (repoName: string) => Promise<IPCResponse>;
+        deleteDeployKey: (repoName: string, keyId: number) => Promise<IPCResponse>;
     };
     servers: {
         list: () => Promise<IPCResponse>;
@@ -221,7 +249,19 @@ export interface ElectronAPI {
         getStats: (serverId: string) => Promise<IPCResponse>;
         getLogs: (serverId: string, lines?: number) => Promise<IPCResponse>;
         testConnection: (server: any) => Promise<IPCResponse>;
+        testConnectionDetailed: (serverId: string) => Promise<IPCResponse>;
         directDeploy: (payload: any) => Promise<IPCResponse>;
+        uploadPublicKey: (serverId: string, publicKey: string) => Promise<IPCResponse>;
+        detectDeployPaths: (serverId: string) => Promise<IPCResponse>;
+        setupPermissions: (serverId: string, targetPath: string, config: any) => Promise<IPCResponse>;
+        createGitHooks: (serverId: string, repoPath: string, hooks: { name: string; script: string }[]) => Promise<IPCResponse>;
+    };
+    sshKeys: {
+        generate: (options: any) => Promise<IPCResponse>;
+        list: () => Promise<IPCResponse>;
+        get: (name: string) => Promise<IPCResponse>;
+        delete: (name: string) => Promise<IPCResponse>;
+        import: (name: string, privateKeyPath: string) => Promise<IPCResponse>;
     };
     deploy: {
         create: (config: any) => Promise<IPCResponse>;

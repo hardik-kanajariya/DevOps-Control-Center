@@ -3,7 +3,13 @@ import {
     DirectDeploymentRequest,
     DirectDeploymentResult,
     ServerStats,
-    VPSServer
+    VPSServer,
+    SSHKeyGenerationOptions,
+    SSHKeyInfo,
+    SSHConnectionTestResult,
+    SuggestedDeployPath,
+    PermissionConfig,
+    GitHubDeployKey
 } from '../../../shared/types';
 
 interface ServersState {
@@ -21,6 +27,28 @@ interface ServersState {
         startedAt?: string;
         finishedAt?: string;
     }>;
+    // SSH Key management state
+    sshKeys: SSHKeyInfo[];
+    sshKeysLoading: boolean;
+    sshKeysError: string | null;
+    // Connection test state
+    connectionTests: Record<string, {
+        result?: SSHConnectionTestResult;
+        loading: boolean;
+        error?: string;
+    }>;
+    // Deploy paths detection state
+    deployPaths: Record<string, {
+        paths: SuggestedDeployPath[];
+        loading: boolean;
+        error?: string;
+    }>;
+    // GitHub deploy keys
+    deployKeys: Record<string, {
+        keys: GitHubDeployKey[];
+        loading: boolean;
+        error?: string;
+    }>;
 }
 
 const initialState: ServersState = {
@@ -32,6 +60,16 @@ const initialState: ServersState = {
     logs: {},
     commandOutputs: {},
     deployments: {},
+    // SSH Key management
+    sshKeys: [],
+    sshKeysLoading: false,
+    sshKeysError: null,
+    // Connection tests
+    connectionTests: {},
+    // Deploy paths
+    deployPaths: {},
+    // GitHub deploy keys
+    deployKeys: {},
 };
 
 // Async thunks
@@ -163,6 +201,211 @@ export const directDeployToServer = createAsyncThunk(
             return rejectWithValue(response.error || 'Direct deployment failed');
         } catch (error) {
             return rejectWithValue(error instanceof Error ? error.message : 'Direct deployment failed');
+        }
+    }
+);
+
+// =============================================================================
+// SSH Key Management Thunks
+// =============================================================================
+
+export const generateSSHKey = createAsyncThunk(
+    'servers/generateSSHKey',
+    async (options: SSHKeyGenerationOptions, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.sshKeys.generate(options);
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return response.data as SSHKeyInfo;
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to generate SSH key');
+        }
+    }
+);
+
+export const fetchSSHKeys = createAsyncThunk(
+    'servers/fetchSSHKeys',
+    async (_, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.sshKeys.list();
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return response.data as SSHKeyInfo[];
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to fetch SSH keys');
+        }
+    }
+);
+
+export const deleteSSHKey = createAsyncThunk(
+    'servers/deleteSSHKey',
+    async (name: string, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.sshKeys.delete(name);
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return name;
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to delete SSH key');
+        }
+    }
+);
+
+export const importSSHKey = createAsyncThunk(
+    'servers/importSSHKey',
+    async (params: { name: string; privateKeyPath: string }, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.sshKeys.import(params.name, params.privateKeyPath);
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return response.data as SSHKeyInfo;
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to import SSH key');
+        }
+    }
+);
+
+// =============================================================================
+// Connection & Server Setup Thunks
+// =============================================================================
+
+export const testConnectionDetailed = createAsyncThunk(
+    'servers/testConnectionDetailed',
+    async (serverId: string, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.servers.testConnectionDetailed(serverId);
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return { serverId, result: response.data as SSHConnectionTestResult };
+        } catch (error) {
+            return rejectWithValue({ serverId, error: error instanceof Error ? error.message : 'Connection test failed' });
+        }
+    }
+);
+
+export const uploadPublicKeyToServer = createAsyncThunk(
+    'servers/uploadPublicKey',
+    async (params: { serverId: string; publicKey: string }, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.servers.uploadPublicKey(params.serverId, params.publicKey);
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return { serverId: params.serverId, success: true };
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to upload public key');
+        }
+    }
+);
+
+export const detectDeployPaths = createAsyncThunk(
+    'servers/detectDeployPaths',
+    async (serverId: string, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.servers.detectDeployPaths(serverId);
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return { serverId, paths: response.data as SuggestedDeployPath[] };
+        } catch (error) {
+            return rejectWithValue({ serverId, error: error instanceof Error ? error.message : 'Failed to detect deploy paths' });
+        }
+    }
+);
+
+export const setupPermissions = createAsyncThunk(
+    'servers/setupPermissions',
+    async (params: { serverId: string; targetPath: string; config: PermissionConfig }, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.servers.setupPermissions(
+                params.serverId,
+                params.targetPath,
+                params.config
+            );
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return { success: true };
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to setup permissions');
+        }
+    }
+);
+
+export const createGitHooks = createAsyncThunk(
+    'servers/createGitHooks',
+    async (params: { serverId: string; repoPath: string; hooks: { name: string; script: string }[] }, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.servers.createGitHooks(
+                params.serverId,
+                params.repoPath,
+                params.hooks
+            );
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return { success: true };
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to create git hooks');
+        }
+    }
+);
+
+// =============================================================================
+// GitHub Deploy Key Thunks
+// =============================================================================
+
+export const fetchDeployKeys = createAsyncThunk(
+    'servers/fetchDeployKeys',
+    async (repoName: string, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.repos.listDeployKeys(repoName);
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return { repoName, keys: response.data as GitHubDeployKey[] };
+        } catch (error) {
+            return rejectWithValue({ repoName, error: error instanceof Error ? error.message : 'Failed to fetch deploy keys' });
+        }
+    }
+);
+
+export const addDeployKey = createAsyncThunk(
+    'servers/addDeployKey',
+    async (params: { repoName: string; publicKey: string; title: string; readOnly?: boolean }, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.repos.addDeployKey(
+                params.repoName,
+                params.publicKey,
+                params.title,
+                params.readOnly
+            );
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return { repoName: params.repoName, key: response.data as GitHubDeployKey };
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to add deploy key');
+        }
+    }
+);
+
+export const deleteDeployKey = createAsyncThunk(
+    'servers/deleteDeployKey',
+    async (params: { repoName: string; keyId: number }, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.repos.deleteDeployKey(params.repoName, params.keyId);
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return { repoName: params.repoName, keyId: params.keyId };
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to delete deploy key');
         }
     }
 );
@@ -386,6 +629,128 @@ const serversSlice = createSlice({
                     };
                 }
                 state.error = action.payload as string || action.error.message || 'Direct deployment failed';
+            })
+            // =========================================================================
+            // SSH Key Management
+            // =========================================================================
+            .addCase(generateSSHKey.pending, (state) => {
+                state.sshKeysLoading = true;
+                state.sshKeysError = null;
+            })
+            .addCase(generateSSHKey.fulfilled, (state, action) => {
+                state.sshKeysLoading = false;
+                state.sshKeys.push(action.payload);
+            })
+            .addCase(generateSSHKey.rejected, (state, action) => {
+                state.sshKeysLoading = false;
+                state.sshKeysError = action.payload as string || 'Failed to generate SSH key';
+            })
+            .addCase(fetchSSHKeys.pending, (state) => {
+                state.sshKeysLoading = true;
+                state.sshKeysError = null;
+            })
+            .addCase(fetchSSHKeys.fulfilled, (state, action) => {
+                state.sshKeysLoading = false;
+                state.sshKeys = action.payload;
+            })
+            .addCase(fetchSSHKeys.rejected, (state, action) => {
+                state.sshKeysLoading = false;
+                state.sshKeysError = action.payload as string || 'Failed to fetch SSH keys';
+            })
+            .addCase(deleteSSHKey.fulfilled, (state, action) => {
+                state.sshKeys = state.sshKeys.filter(key => key.name !== action.payload);
+            })
+            .addCase(deleteSSHKey.rejected, (state, action) => {
+                state.sshKeysError = action.payload as string || 'Failed to delete SSH key';
+            })
+            .addCase(importSSHKey.pending, (state) => {
+                state.sshKeysLoading = true;
+                state.sshKeysError = null;
+            })
+            .addCase(importSSHKey.fulfilled, (state, action) => {
+                state.sshKeysLoading = false;
+                state.sshKeys.push(action.payload);
+            })
+            .addCase(importSSHKey.rejected, (state, action) => {
+                state.sshKeysLoading = false;
+                state.sshKeysError = action.payload as string || 'Failed to import SSH key';
+            })
+            // =========================================================================
+            // Connection Testing
+            // =========================================================================
+            .addCase(testConnectionDetailed.pending, (state, action) => {
+                state.connectionTests[action.meta.arg] = { loading: true };
+            })
+            .addCase(testConnectionDetailed.fulfilled, (state, action) => {
+                state.connectionTests[action.payload.serverId] = {
+                    loading: false,
+                    result: action.payload.result
+                };
+            })
+            .addCase(testConnectionDetailed.rejected, (state, action) => {
+                const payload = action.payload as { serverId: string; error: string };
+                state.connectionTests[payload?.serverId || action.meta.arg] = {
+                    loading: false,
+                    error: payload?.error || 'Connection test failed'
+                };
+            })
+            // =========================================================================
+            // Deploy Path Detection
+            // =========================================================================
+            .addCase(detectDeployPaths.pending, (state, action) => {
+                state.deployPaths[action.meta.arg] = { paths: [], loading: true };
+            })
+            .addCase(detectDeployPaths.fulfilled, (state, action) => {
+                state.deployPaths[action.payload.serverId] = {
+                    paths: action.payload.paths,
+                    loading: false
+                };
+            })
+            .addCase(detectDeployPaths.rejected, (state, action) => {
+                const payload = action.payload as { serverId: string; error: string };
+                state.deployPaths[payload?.serverId || action.meta.arg] = {
+                    paths: [],
+                    loading: false,
+                    error: payload?.error || 'Failed to detect deploy paths'
+                };
+            })
+            // =========================================================================
+            // GitHub Deploy Keys
+            // =========================================================================
+            .addCase(fetchDeployKeys.pending, (state, action) => {
+                state.deployKeys[action.meta.arg] = { keys: [], loading: true };
+            })
+            .addCase(fetchDeployKeys.fulfilled, (state, action) => {
+                state.deployKeys[action.payload.repoName] = {
+                    keys: action.payload.keys,
+                    loading: false
+                };
+            })
+            .addCase(fetchDeployKeys.rejected, (state, action) => {
+                const payload = action.payload as { repoName: string; error: string };
+                state.deployKeys[payload?.repoName || action.meta.arg] = {
+                    keys: [],
+                    loading: false,
+                    error: payload?.error || 'Failed to fetch deploy keys'
+                };
+            })
+            .addCase(addDeployKey.fulfilled, (state, action) => {
+                const repoKeys = state.deployKeys[action.payload.repoName];
+                if (repoKeys) {
+                    repoKeys.keys.push(action.payload.key);
+                }
+            })
+            .addCase(addDeployKey.rejected, (state, action) => {
+                state.error = action.payload as string || 'Failed to add deploy key';
+            })
+            .addCase(deleteDeployKey.fulfilled, (state, action) => {
+                const repoKeys = state.deployKeys[action.payload.repoName];
+                if (repoKeys) {
+                    repoKeys.keys = repoKeys.keys.filter(key => key.id !== action.payload.keyId);
+                }
+            })
+            .addCase(deleteDeployKey.rejected, (state, action) => {
+                state.error = action.payload as string || 'Failed to delete deploy key';
             });
     },
 });

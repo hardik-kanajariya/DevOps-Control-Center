@@ -3,7 +3,10 @@ import {
     DirectDeploymentRequest,
     DirectDeploymentResult,
     DirectDeploymentStepResult,
-    ServerStats
+    ServerStats,
+    SSHConnectionTestResult,
+    SuggestedDeployPath,
+    PermissionConfig
 } from '../../shared/types';
 import { EventEmitter } from 'events';
 import * as fs from 'fs/promises';
@@ -459,6 +462,261 @@ export class ServerManagementService extends EventEmitter {
                 resolve({ success: false, error: 'No authentication method provided' });
             }
         });
+    }
+
+    /**
+     * Test connection and return detailed server information
+     */
+    public async testConnectionDetailed(serverId: string): Promise<SSHConnectionTestResult> {
+        const server = this.servers.get(serverId);
+        if (!server) {
+            return {
+                success: false,
+                host: '',
+                username: '',
+                authenticationType: 'key',
+                error: 'Server not found'
+            };
+        }
+
+        const startTime = Date.now();
+
+        try {
+            await this.ensureConnected(serverId);
+
+            // Get detailed system info
+            const [osInfo, kernelInfo, whoami, homeDir] = await Promise.all([
+                this.executeCommand(serverId, 'cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2 | tr -d \'"\'').catch(() => ({ stdout: '' })),
+                this.executeCommand(serverId, 'uname -r').catch(() => ({ stdout: '' })),
+                this.executeCommand(serverId, 'whoami').catch(() => ({ stdout: '' })),
+                this.executeCommand(serverId, 'echo $HOME').catch(() => ({ stdout: '' }))
+            ]);
+
+            const connectionTime = Date.now() - startTime;
+
+            return {
+                success: true,
+                host: server.host,
+                username: server.username,
+                authenticationType: server.privateKeyPath ? 'key' : 'password',
+                osInfo: osInfo.stdout.trim() || undefined,
+                kernelVersion: kernelInfo.stdout.trim() || undefined,
+                homeDirectory: homeDir.stdout.trim() || undefined,
+                currentUser: whoami.stdout.trim() || undefined,
+                connectionTime
+            };
+        } catch (error) {
+            return {
+                success: false,
+                host: server.host,
+                username: server.username,
+                authenticationType: server.privateKeyPath ? 'key' : 'password',
+                error: (error as Error).message,
+                connectionTime: Date.now() - startTime
+            };
+        }
+    }
+
+    /**
+     * Upload a public SSH key to the server's authorized_keys
+     */
+    public async uploadPublicKeyToServer(serverId: string, publicKey: string): Promise<{ success: boolean; error?: string }> {
+        try {
+            await this.ensureConnected(serverId);
+
+            // Validate public key format
+            if (!publicKey.startsWith('ssh-') && !publicKey.startsWith('ecdsa-')) {
+                throw new Error('Invalid public key format');
+            }
+
+            // Escape the key for shell
+            const escapedKey = this.shellQuote(publicKey.trim());
+
+            // Create .ssh directory if it doesn't exist and add the key
+            const script = `
+set -e
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+touch ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+KEY=${escapedKey}
+if ! grep -qF "$KEY" ~/.ssh/authorized_keys 2>/dev/null; then
+    echo "$KEY" >> ~/.ssh/authorized_keys
+    echo "Key added successfully"
+else
+    echo "Key already exists"
+fi
+`;
+            const result = await this.executeCommand(serverId, `bash -c ${this.shellQuote(script)}`);
+
+            if (result.code !== 0) {
+                throw new Error(result.stderr || 'Failed to add public key');
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    }
+
+    /**
+     * Detect common deployment paths on the server
+     */
+    public async detectDeployPaths(serverId: string): Promise<SuggestedDeployPath[]> {
+        try {
+            await this.ensureConnected(serverId);
+
+            const paths: SuggestedDeployPath[] = [];
+
+            // Define common paths to check
+            const pathsToCheck = [
+                { path: '/var/www/html', type: 'webroot' as const, description: 'Apache default webroot' },
+                { path: '/var/www', type: 'webroot' as const, description: 'Common webroot parent' },
+                { path: '/usr/share/nginx/html', type: 'webroot' as const, description: 'Nginx default webroot' },
+                { path: '/srv/www', type: 'webroot' as const, description: 'Alternative webroot' },
+                { path: '~/www', type: 'home' as const, description: 'User www directory' },
+                { path: '~/public_html', type: 'home' as const, description: 'User public_html directory' },
+                { path: '~/apps', type: 'home' as const, description: 'User apps directory' },
+                { path: '/opt/apps', type: 'var' as const, description: 'Optional apps directory' },
+            ];
+
+            // Get home directory
+            const homeResult = await this.executeCommand(serverId, 'echo $HOME');
+            const homeDir = homeResult.stdout.trim();
+
+            for (const pathInfo of pathsToCheck) {
+                // Expand ~ to home directory
+                const expandedPath = pathInfo.path.replace('~', homeDir);
+
+                const checkScript = `
+if [ -d "${expandedPath}" ]; then
+    echo "exists"
+    if [ -w "${expandedPath}" ]; then
+        echo "writable"
+    else
+        echo "not_writable"
+    fi
+else
+    echo "not_exists"
+fi
+`;
+                const result = await this.executeCommand(serverId, checkScript);
+                const lines = result.stdout.trim().split('\n');
+
+                paths.push({
+                    path: expandedPath,
+                    type: pathInfo.type,
+                    exists: lines[0] === 'exists',
+                    writable: lines[1] === 'writable',
+                    description: pathInfo.description
+                });
+            }
+
+            // Sort: existing and writable first
+            paths.sort((a, b) => {
+                if (a.exists && a.writable && (!b.exists || !b.writable)) return -1;
+                if (b.exists && b.writable && (!a.exists || !a.writable)) return 1;
+                if (a.exists && !b.exists) return -1;
+                if (b.exists && !a.exists) return 1;
+                return 0;
+            });
+
+            return paths;
+        } catch (error) {
+            console.error('Error detecting deploy paths:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Setup file permissions for a deployed application
+     */
+    public async setupPermissions(
+        serverId: string,
+        targetPath: string,
+        config: PermissionConfig
+    ): Promise<{ success: boolean; error?: string }> {
+        try {
+            this.sanitizeTargetPath(targetPath);
+            await this.ensureConnected(serverId);
+
+            const {
+                owner = 'www-data',
+                group = 'www-data',
+                fileMode = '644',
+                dirMode = '755',
+                recursive = true
+            } = config;
+
+            const commands: string[] = [];
+
+            // Change ownership
+            if (owner || group) {
+                const ownerGroup = `${owner}:${group}`;
+                commands.push(`chown ${recursive ? '-R' : ''} ${ownerGroup} ${this.shellQuote(targetPath)}`);
+            }
+
+            // Set directory permissions
+            if (dirMode && recursive) {
+                commands.push(`find ${this.shellQuote(targetPath)} -type d -exec chmod ${dirMode} {} \\;`);
+            }
+
+            // Set file permissions  
+            if (fileMode && recursive) {
+                commands.push(`find ${this.shellQuote(targetPath)} -type f -exec chmod ${fileMode} {} \\;`);
+            }
+
+            const script = `set -e\n${commands.join('\n')}`;
+            const result = await this.executeCommand(serverId, `sudo bash -c ${this.shellQuote(script)}`);
+
+            if (result.code !== 0) {
+                // Try without sudo
+                const resultNoSudo = await this.executeCommand(serverId, `bash -c ${this.shellQuote(script)}`);
+                if (resultNoSudo.code !== 0) {
+                    throw new Error(resultNoSudo.stderr || 'Failed to set permissions');
+                }
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    }
+
+    /**
+     * Create git hooks for a deployed repository
+     */
+    public async createGitHooks(
+        serverId: string,
+        repoPath: string,
+        hooks: { name: string; script: string }[]
+    ): Promise<{ success: boolean; error?: string }> {
+        try {
+            this.sanitizeTargetPath(repoPath);
+            await this.ensureConnected(serverId);
+
+            for (const hook of hooks) {
+                const hookPath = `${repoPath}/.git/hooks/${hook.name}`;
+                const escapedScript = this.shellQuote(hook.script);
+
+                const commands = `
+set -e
+cat > ${this.shellQuote(hookPath)} << 'HOOK_EOF'
+${hook.script}
+HOOK_EOF
+chmod +x ${this.shellQuote(hookPath)}
+`;
+                const result = await this.executeCommand(serverId, `bash -c ${this.shellQuote(commands)}`);
+
+                if (result.code !== 0) {
+                    throw new Error(`Failed to create hook ${hook.name}: ${result.stderr}`);
+                }
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
     }
 
     public async directDeploy(request: DirectDeploymentRequest): Promise<DirectDeploymentResult> {

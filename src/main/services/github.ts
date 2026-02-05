@@ -1,6 +1,6 @@
 import { Octokit } from '@octokit/rest';
 import { AuthService } from './auth';
-import { GitHubRepository } from '../../shared/types';
+import { GitHubRepository, GitHubDeployKey } from '../../shared/types';
 
 export class GitHubService {
     private static octokit: Octokit | null = null;
@@ -90,6 +90,75 @@ export class GitHubService {
         });
 
         return data.workflow_runs;
+    }
+
+    /**
+     * Add a deploy key to a repository
+     */
+    static async addDeployKey(
+        repoName: string,
+        publicKey: string,
+        title: string,
+        readOnly: boolean = true
+    ): Promise<GitHubDeployKey> {
+        const octokit = await this.getOctokit();
+        const user = await AuthService.getCurrentUser();
+
+        const { data } = await octokit.rest.repos.createDeployKey({
+            owner: user.login,
+            repo: repoName,
+            title,
+            key: publicKey,
+            read_only: readOnly
+        });
+
+        return {
+            id: data.id,
+            key: data.key,
+            url: data.url,
+            title: data.title,
+            verified: data.verified,
+            created_at: data.created_at,
+            read_only: data.read_only ?? true
+        };
+    }
+
+    /**
+     * List deploy keys for a repository
+     */
+    static async listDeployKeys(repoName: string): Promise<GitHubDeployKey[]> {
+        const octokit = await this.getOctokit();
+        const user = await AuthService.getCurrentUser();
+
+        const { data } = await octokit.rest.repos.listDeployKeys({
+            owner: user.login,
+            repo: repoName,
+            per_page: 100
+        });
+
+        return data.map(key => ({
+            id: key.id,
+            key: key.key,
+            url: key.url,
+            title: key.title,
+            verified: key.verified,
+            created_at: key.created_at,
+            read_only: key.read_only ?? true
+        }));
+    }
+
+    /**
+     * Delete a deploy key from a repository
+     */
+    static async deleteDeployKey(repoName: string, keyId: number): Promise<void> {
+        const octokit = await this.getOctokit();
+        const user = await AuthService.getCurrentUser();
+
+        await octokit.rest.repos.deleteDeployKey({
+            owner: user.login,
+            repo: repoName,
+            key_id: keyId
+        });
     }
 
     static resetConnection(): void {

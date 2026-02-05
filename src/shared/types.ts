@@ -63,6 +63,68 @@ export interface VPSServer {
     loadAverage?: number[];
 }
 
+// SSH Key Management Types
+export interface SSHKeyGenerationOptions {
+    name: string;
+    type?: 'ed25519' | 'rsa';
+    passphrase?: string;
+    comment?: string;
+}
+
+export interface SSHKeyInfo {
+    name: string;
+    type: 'ed25519' | 'rsa';
+    privateKeyPath: string;
+    publicKeyPath: string;
+    publicKey: string;
+    fingerprint: string;
+    createdAt: string;
+    hasPassphrase: boolean;
+}
+
+export interface SSHKeyPair extends SSHKeyInfo {
+    // SSHKeyInfo already has all fields, this interface is for newly generated keys
+}
+
+export interface SSHConnectionTestResult {
+    success: boolean;
+    host: string;
+    username: string;
+    authenticationType: 'key' | 'password';
+    osInfo?: string;
+    kernelVersion?: string;
+    homeDirectory?: string;
+    currentUser?: string;
+    connectionTime?: number;
+    error?: string;
+}
+
+export interface SuggestedDeployPath {
+    path: string;
+    type: 'webroot' | 'home' | 'var' | 'custom';
+    exists: boolean;
+    writable: boolean;
+    description: string;
+}
+
+export interface PermissionConfig {
+    owner?: string;
+    group?: string;
+    fileMode?: string;
+    dirMode?: string;
+    recursive?: boolean;
+}
+
+export interface GitHubDeployKey {
+    id: number;
+    key: string;
+    url: string;
+    title: string;
+    verified: boolean;
+    created_at: string;
+    read_only: boolean;
+}
+
 export interface ServerResourceUsage {
     used: number;
     total: number;
@@ -227,6 +289,9 @@ export type IPCChannels =
     | 'repos:workflows'
     | 'repos:open-browser'
     | 'repos:check-local'
+    | 'repos:add-deploy-key'
+    | 'repos:list-deploy-keys'
+    | 'repos:delete-deploy-key'
     | 'workflows:list-all'
     | 'workflows:list-repo'
     | 'workflows:get-yaml'
@@ -255,6 +320,14 @@ export type IPCChannels =
     | 'servers:get-logs'
     | 'servers:test-connection'
     | 'servers:direct-deploy'
+    | 'servers:upload-public-key'
+    | 'servers:detect-deploy-paths'
+    | 'servers:setup-permissions'
+    | 'ssh-keys:generate'
+    | 'ssh-keys:list'
+    | 'ssh-keys:get'
+    | 'ssh-keys:delete'
+    | 'ssh-keys:import'
     | 'deploy:create'
     | 'deploy:run'
     | 'deploy:history'

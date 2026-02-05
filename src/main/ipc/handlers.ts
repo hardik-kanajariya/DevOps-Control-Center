@@ -6,13 +6,20 @@ import { RepositoryService } from '../services/repository';
 import { WorkflowService } from '../services/workflow';
 import { DatabaseManagementService } from '../services/databaseManagement';
 import { serverManagementService } from '../services/serverManagement';
+import { sshKeyService } from '../services/sshKeyService';
 import {
     DirectDeploymentRequest,
     DirectDeploymentResult,
     IPCResponse,
     ServerStats,
     ServerStatusPayload,
-    VPSServer
+    VPSServer,
+    SSHKeyGenerationOptions,
+    SSHKeyInfo,
+    SSHConnectionTestResult,
+    SuggestedDeployPath,
+    PermissionConfig,
+    GitHubDeployKey
 } from '../../shared/types';
 
 export function registerIPCHandlers(): void {
@@ -429,6 +436,131 @@ export function registerIPCHandlers(): void {
                 return { success: true, data: result };
             }
             return { success: false, data: result, error: result.error };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    // New Server Management handlers for SSH & Git Setup
+    ipcMain.handle('servers:test-connection-detailed', async (_, serverId: string): Promise<IPCResponse<SSHConnectionTestResult>> => {
+        try {
+            const result = await serverManagementService.testConnectionDetailed(serverId);
+            return { success: true, data: result };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:upload-public-key', async (_, serverId: string, publicKey: string): Promise<IPCResponse> => {
+        try {
+            const result = await serverManagementService.uploadPublicKeyToServer(serverId, publicKey);
+            return result.success ? { success: true } : { success: false, error: result.error };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:detect-deploy-paths', async (_, serverId: string): Promise<IPCResponse<SuggestedDeployPath[]>> => {
+        try {
+            const paths = await serverManagementService.detectDeployPaths(serverId);
+            return { success: true, data: paths };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:setup-permissions', async (_, serverId: string, targetPath: string, config: PermissionConfig): Promise<IPCResponse> => {
+        try {
+            const result = await serverManagementService.setupPermissions(serverId, targetPath, config);
+            return result.success ? { success: true } : { success: false, error: result.error };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('servers:create-git-hooks', async (_, serverId: string, repoPath: string, hooks: { name: string; script: string }[]): Promise<IPCResponse> => {
+        try {
+            const result = await serverManagementService.createGitHooks(serverId, repoPath, hooks);
+            return result.success ? { success: true } : { success: false, error: result.error };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    // SSH Key Management handlers
+    ipcMain.handle('ssh-keys:generate', async (_, options: SSHKeyGenerationOptions): Promise<IPCResponse<SSHKeyInfo>> => {
+        try {
+            await sshKeyService.initialize();
+            const keyPair = await sshKeyService.generateKeyPair(options);
+            return { success: true, data: keyPair };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('ssh-keys:list', async (): Promise<IPCResponse<SSHKeyInfo[]>> => {
+        try {
+            await sshKeyService.initialize();
+            const keys = await sshKeyService.listKeys();
+            return { success: true, data: keys };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('ssh-keys:get', async (_, name: string): Promise<IPCResponse<SSHKeyInfo | null>> => {
+        try {
+            await sshKeyService.initialize();
+            const key = await sshKeyService.getKey(name);
+            return { success: true, data: key };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('ssh-keys:delete', async (_, name: string): Promise<IPCResponse> => {
+        try {
+            await sshKeyService.initialize();
+            await sshKeyService.deleteKey(name);
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('ssh-keys:import', async (_, name: string, privateKeyPath: string): Promise<IPCResponse<SSHKeyInfo>> => {
+        try {
+            await sshKeyService.initialize();
+            const keyInfo = await sshKeyService.importKey(name, privateKeyPath);
+            return { success: true, data: keyInfo };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    // GitHub Deploy Key handlers
+    ipcMain.handle('repos:add-deploy-key', async (_, repoName: string, publicKey: string, title: string, readOnly?: boolean): Promise<IPCResponse<GitHubDeployKey>> => {
+        try {
+            const deployKey = await GitHubService.addDeployKey(repoName, publicKey, title, readOnly);
+            return { success: true, data: deployKey };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('repos:list-deploy-keys', async (_, repoName: string): Promise<IPCResponse<GitHubDeployKey[]>> => {
+        try {
+            const deployKeys = await GitHubService.listDeployKeys(repoName);
+            return { success: true, data: deployKeys };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
+    ipcMain.handle('repos:delete-deploy-key', async (_, repoName: string, keyId: number): Promise<IPCResponse> => {
+        try {
+            await GitHubService.deleteDeployKey(repoName, keyId);
+            return { success: true };
         } catch (error) {
             return { success: false, error: (error as Error).message };
         }
