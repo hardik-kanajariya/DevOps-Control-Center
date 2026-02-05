@@ -202,6 +202,15 @@ export function registerIPCHandlers(): void {
         }
     });
 
+    ipcMain.handle('workflows:get-jobs', async (_, owner: string, repo: string, runId: number): Promise<IPCResponse> => {
+        try {
+            const jobs = await WorkflowService.getInstance().getWorkflowJobs(owner, repo, runId);
+            return { success: true, data: jobs };
+        } catch (error) {
+            return { success: false, error: (error as Error).message };
+        }
+    });
+
     ipcMain.handle('workflows:get-yaml', async (_, owner: string, repo: string, workflowId: number): Promise<IPCResponse> => {
         try {
             const yaml = await WorkflowService.getInstance().getWorkflowYAML(owner, repo, workflowId);

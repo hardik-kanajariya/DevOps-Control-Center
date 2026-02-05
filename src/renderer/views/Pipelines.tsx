@@ -1,123 +1,170 @@
-import { useState } from 'react';
-
-interface Pipeline {
-    id: number;
-    name: string;
-    description: string;
-    repository: string;
-    branch: string;
-    status: 'success' | 'failed' | 'running' | 'pending';
-    trigger: 'push' | 'manual' | 'schedule' | 'pull_request';
-    lastRun: string;
-    duration: number;
-    environment: 'production' | 'staging' | 'development';
-    steps: PipelineStep[];
-}
-
-interface PipelineStep {
-    id: number;
-    name: string;
-    status: 'success' | 'failed' | 'running' | 'pending' | 'skipped';
-    duration?: number;
-    logs?: string[];
-}
-
-// Mock pipeline data
-const mockPipelines: Pipeline[] = [
-    {
-        id: 1,
-        name: 'Web App CI/CD',
-        description: 'Build, test, and deploy web application',
-        repository: 'user/awesome-web-app',
-        branch: 'main',
-        status: 'success',
-        trigger: 'push',
-        lastRun: '2024-08-14T10:30:00Z',
-        duration: 180,
-        environment: 'production',
-        steps: [
-            { id: 1, name: 'Checkout Code', status: 'success', duration: 15 },
-            { id: 2, name: 'Install Dependencies', status: 'success', duration: 45 },
-            { id: 3, name: 'Run Tests', status: 'success', duration: 60 },
-            { id: 4, name: 'Build Application', status: 'success', duration: 30 },
-            { id: 5, name: 'Deploy to Production', status: 'success', duration: 30 }
-        ]
-    },
-    {
-        id: 2,
-        name: 'API Service Pipeline',
-        description: 'Build and deploy API service with database migrations',
-        repository: 'user/api-service',
-        branch: 'develop',
-        status: 'running',
-        trigger: 'push',
-        lastRun: '2024-08-14T11:15:00Z',
-        duration: 0,
-        environment: 'staging',
-        steps: [
-            { id: 1, name: 'Checkout Code', status: 'success', duration: 12 },
-            { id: 2, name: 'Setup Python Environment', status: 'success', duration: 25 },
-            { id: 3, name: 'Run Unit Tests', status: 'running' },
-            { id: 4, name: 'Run Integration Tests', status: 'pending' },
-            { id: 5, name: 'Build Docker Image', status: 'pending' },
-            { id: 6, name: 'Deploy to Staging', status: 'pending' }
-        ]
-    },
-    {
-        id: 3,
-        name: 'Mobile App Build',
-        description: 'Build and test mobile application',
-        repository: 'user/mobile-client',
-        branch: 'feature/new-ui',
-        status: 'failed',
-        trigger: 'pull_request',
-        lastRun: '2024-08-14T09:45:00Z',
-        duration: 95,
-        environment: 'development',
-        steps: [
-            { id: 1, name: 'Checkout Code', status: 'success', duration: 10 },
-            { id: 2, name: 'Install Node.js', status: 'success', duration: 20 },
-            { id: 3, name: 'Install Dependencies', status: 'success', duration: 35 },
-            { id: 4, name: 'Run Linting', status: 'failed', duration: 15 },
-            { id: 5, name: 'Run Tests', status: 'skipped' },
-            { id: 6, name: 'Build App', status: 'skipped' }
-        ]
-    }
-];
+import { useEffect, useState, useMemo } from 'react';
+import { useAppSelector, useAppDispatch } from '../hooks/redux';
+import {
+    fetchAllWorkflows,
+    fetchWorkflowJobs,
+    cancelWorkflowRun,
+    rerunWorkflow,
+    openWorkflowInBrowser,
+    setSelectedWorkflow,
+    setFilterBy,
+    clearWorkflowJobs
+} from '../store/slices/workflowsSlice';
+import { WorkflowRun, WorkflowJob, WorkflowStep } from '../../shared/types';
 
 export default function Pipelines() {
-    const [pipelines] = useState(mockPipelines);
-    const [selectedPipeline, setSelectedPipeline] = useState<Pipeline | null>(null);
-    const [showCreateModal, setShowCreateModal] = useState(false);
+    const dispatch = useAppDispatch();
+    const {
+        workflows,
+        selectedWorkflow,
+        workflowJobs,
+        loading,
+        jobsLoading,
+        actionLoading,
+        error,
+        lastUpdated,
+        filterBy
+    } = useAppSelector((state) => state.workflows);
+
+    const [searchTerm, setSearchTerm] = useState('');
     const [showLogsModal, setShowLogsModal] = useState(false);
-    const [selectedStep, setSelectedStep] = useState<PipelineStep | null>(null);
+    const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
+    const [selectedJob, setSelectedJob] = useState<WorkflowJob | null>(null);
 
-    const handleSelectPipeline = (pipeline: Pipeline) => {
-        setSelectedPipeline(pipeline);
+    // Load workflows on component mount
+    useEffect(() => {
+        dispatch(fetchAllWorkflows());
+    }, [dispatch]);
+
+    // Auto-refresh every 2 minutes
+    useEffect(() => {
+        const interval = setInterval(() => {
+            dispatch(fetchAllWorkflows());
+        }, 2 * 60 * 1000);
+
+        return () => clearInterval(interval);
+    }, [dispatch]);
+
+    // Load jobs when workflow is selected
+    useEffect(() => {
+        if (selectedWorkflow && selectedWorkflow.repository) {
+            dispatch(fetchWorkflowJobs({
+                owner: selectedWorkflow.repository.owner,
+                repo: selectedWorkflow.repository.name,
+                runId: selectedWorkflow.id
+            }));
+        }
+    }, [selectedWorkflow, dispatch]);
+
+    // Filter and sort workflows
+    const filteredWorkflows = useMemo(() => {
+        let filtered = [...workflows];
+
+        // Apply search filter
+        if (searchTerm.trim()) {
+            const searchLower = searchTerm.toLowerCase();
+            filtered = filtered.filter(workflow =>
+                workflow.name.toLowerCase().includes(searchLower) ||
+                workflow.head_branch.toLowerCase().includes(searchLower) ||
+                workflow.repository?.full_name?.toLowerCase().includes(searchLower)
+            );
+        }
+
+        // Apply status filter
+        if (filterBy !== 'all') {
+            if (filterBy === 'success') {
+                filtered = filtered.filter(w => w.conclusion === 'success');
+            } else if (filterBy === 'failure') {
+                filtered = filtered.filter(w => w.conclusion === 'failure');
+            } else if (filterBy === 'in_progress') {
+                filtered = filtered.filter(w => w.status === 'in_progress');
+            } else if (filterBy === 'cancelled') {
+                filtered = filtered.filter(w => w.conclusion === 'cancelled');
+            }
+        }
+
+        // Sort by updated_at desc
+        filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+        return filtered;
+    }, [workflows, searchTerm, filterBy]);
+
+    const handleSelectPipeline = (workflow: WorkflowRun) => {
+        dispatch(setSelectedWorkflow(workflow));
+        dispatch(clearWorkflowJobs());
     };
 
-    const handleRunPipeline = (pipeline: Pipeline) => {
-        // In real implementation, would trigger pipeline via IPC
-        console.log(`Running pipeline: ${pipeline.name}`);
+    const handleRefresh = () => {
+        dispatch(fetchAllWorkflows());
     };
 
-    const handleStepClick = (step: PipelineStep) => {
+    const handleRunPipeline = async () => {
+        if (!selectedWorkflow || !selectedWorkflow.repository) return;
+
+        await dispatch(rerunWorkflow({
+            owner: selectedWorkflow.repository.owner,
+            repo: selectedWorkflow.repository.name,
+            runId: selectedWorkflow.id
+        }));
+        handleRefresh();
+    };
+
+    const handleCancelPipeline = async () => {
+        if (!selectedWorkflow || !selectedWorkflow.repository) return;
+
+        await dispatch(cancelWorkflowRun({
+            owner: selectedWorkflow.repository.owner,
+            repo: selectedWorkflow.repository.name,
+            runId: selectedWorkflow.id
+        }));
+        handleRefresh();
+    };
+
+    const handleOpenInBrowser = () => {
+        if (selectedWorkflow?.html_url) {
+            dispatch(openWorkflowInBrowser(selectedWorkflow.html_url));
+        }
+    };
+
+    const handleStepClick = (step: WorkflowStep, job: WorkflowJob) => {
         setSelectedStep(step);
+        setSelectedJob(job);
         setShowLogsModal(true);
     };
 
-    const getStatusColor = (status: Pipeline['status'] | PipelineStep['status']) => {
+    const getStatusFromWorkflow = (workflow: WorkflowRun): 'success' | 'failed' | 'running' | 'pending' | 'cancelled' => {
+        if (workflow.status === 'in_progress' || workflow.status === 'queued') {
+            return workflow.status === 'in_progress' ? 'running' : 'pending';
+        }
+        if (workflow.conclusion === 'success') return 'success';
+        if (workflow.conclusion === 'failure') return 'failed';
+        if (workflow.conclusion === 'cancelled') return 'cancelled';
+        return 'pending';
+    };
+
+    const getStepStatus = (step: WorkflowStep): 'success' | 'failed' | 'running' | 'pending' | 'skipped' => {
+        if (step.status === 'in_progress') return 'running';
+        if (step.status === 'queued') return 'pending';
+        if (step.conclusion === 'success') return 'success';
+        if (step.conclusion === 'failure') return 'failed';
+        if (step.conclusion === 'skipped') return 'skipped';
+        if (step.conclusion === 'cancelled') return 'skipped';
+        return 'pending';
+    };
+
+    const getStatusColor = (status: string) => {
         switch (status) {
             case 'success': return 'text-green-600 bg-green-100';
             case 'failed': return 'text-red-600 bg-red-100';
             case 'running': return 'text-blue-600 bg-blue-100';
             case 'pending': return 'text-gray-600 bg-gray-100';
             case 'skipped': return 'text-yellow-600 bg-yellow-100';
+            case 'cancelled': return 'text-orange-600 bg-orange-100';
             default: return 'text-gray-600 bg-gray-100';
         }
     };
 
-    const getStatusIcon = (status: Pipeline['status'] | PipelineStep['status']) => {
+    const getStatusIcon = (status: string) => {
         switch (status) {
             case 'success':
                 return (
@@ -145,6 +192,7 @@ export default function Pipelines() {
                     </svg>
                 );
             case 'skipped':
+            case 'cancelled':
                 return (
                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
@@ -155,7 +203,18 @@ export default function Pipelines() {
         }
     };
 
-    const getEnvironmentColor = (environment: Pipeline['environment']) => {
+    const getEnvironmentFromBranch = (branch: string): 'production' | 'staging' | 'development' => {
+        const branchLower = branch.toLowerCase();
+        if (branchLower === 'main' || branchLower === 'master' || branchLower.includes('prod')) {
+            return 'production';
+        }
+        if (branchLower.includes('stag') || branchLower.includes('release')) {
+            return 'staging';
+        }
+        return 'development';
+    };
+
+    const getEnvironmentColor = (environment: string) => {
         switch (environment) {
             case 'production': return 'bg-red-100 text-red-800';
             case 'staging': return 'bg-yellow-100 text-yellow-800';
@@ -164,14 +223,18 @@ export default function Pipelines() {
         }
     };
 
-    const formatDuration = (seconds: number) => {
-        const minutes = Math.floor(seconds / 60);
-        const remainingSeconds = seconds % 60;
-        return `${minutes}m ${remainingSeconds}s`;
+    const formatDuration = (startedAt?: string, completedAt?: string): string => {
+        if (!startedAt) return '-';
+        const start = new Date(startedAt).getTime();
+        const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+        const diff = Math.floor((end - start) / 1000);
+        const minutes = Math.floor(diff / 60);
+        const seconds = diff % 60;
+        return `${minutes}m ${seconds}s`;
     };
 
-    const formatLastRun = (lastRun: string) => {
-        const date = new Date(lastRun);
+    const formatLastRun = (dateStr: string) => {
+        const date = new Date(dateStr);
         const now = new Date();
         const diff = now.getTime() - date.getTime();
         const minutes = Math.floor(diff / (1000 * 60));
@@ -184,6 +247,29 @@ export default function Pipelines() {
         return `${days}d ago`;
     };
 
+    const getTotalDuration = (): string => {
+        if (!workflowJobs.length) return '-';
+        
+        const startTimes = workflowJobs
+            .filter(job => job.started_at)
+            .map(job => new Date(job.started_at!).getTime());
+        const endTimes = workflowJobs
+            .filter(job => job.completed_at)
+            .map(job => new Date(job.completed_at!).getTime());
+
+        if (!startTimes.length) return '-';
+        
+        const start = Math.min(...startTimes);
+        const end = endTimes.length ? Math.max(...endTimes) : Date.now();
+        const diff = Math.floor((end - start) / 1000);
+        const minutes = Math.floor(diff / 60);
+        const seconds = diff % 60;
+        return `${minutes}m ${seconds}s`;
+    };
+
+    const isRerunLoading = selectedWorkflow ? actionLoading[`rerun-${selectedWorkflow.id}`] : false;
+    const isCancelLoading = selectedWorkflow ? actionLoading[`cancel-${selectedWorkflow.id}`] : false;
+
     return (
         <div className="flex h-full bg-gray-50">
             {/* Pipeline List */}
@@ -192,162 +278,251 @@ export default function Pipelines() {
                     <div className="flex items-center justify-between mb-4">
                         <h1 className="text-xl font-bold text-gray-900">Pipelines</h1>
                         <button
-                            onClick={() => setShowCreateModal(true)}
-                            className="bg-primary-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
+                            onClick={handleRefresh}
+                            disabled={loading}
+                            className="bg-primary-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors disabled:opacity-50"
                         >
-                            Create Pipeline
+                            {loading ? 'Refreshing...' : 'Refresh'}
                         </button>
                     </div>
-                    <div className="relative">
+                    <div className="relative mb-3">
                         <input
                             type="text"
                             placeholder="Search pipelines..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
                             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         />
                         <svg className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
                     </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-4">
-                    <div className="space-y-2">
-                        {pipelines.map((pipeline) => (
+                    {/* Filter buttons */}
+                    <div className="flex flex-wrap gap-2">
+                        {(['all', 'success', 'failure', 'in_progress', 'cancelled'] as const).map((filter) => (
                             <button
-                                key={pipeline.id}
-                                onClick={() => handleSelectPipeline(pipeline)}
-                                className={`w-full text-left p-4 rounded-lg border transition-colors ${selectedPipeline?.id === pipeline.id
-                                        ? 'border-primary-500 bg-primary-50'
-                                        : 'border-gray-200 bg-white hover:bg-gray-50'
-                                    }`}
+                                key={filter}
+                                onClick={() => dispatch(setFilterBy(filter))}
+                                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                                    filterBy === filter
+                                        ? 'bg-primary-600 text-white'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
                             >
-                                <div className="flex items-start justify-between mb-2">
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center space-x-2">
-                                            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(pipeline.status)}`}>
-                                                <span className="mr-1">{getStatusIcon(pipeline.status)}</span>
-                                                {pipeline.status}
-                                            </div>
-                                        </div>
-                                        <h3 className="font-medium text-gray-900 mt-1 truncate">{pipeline.name}</h3>
-                                        <p className="text-sm text-gray-500 mt-1 line-clamp-2">{pipeline.description}</p>
-                                    </div>
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getEnvironmentColor(pipeline.environment)}`}>
-                                        {pipeline.environment}
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between text-xs text-gray-500">
-                                    <span>{pipeline.repository}</span>
-                                    <span>{formatLastRun(pipeline.lastRun)}</span>
-                                </div>
-                                <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
-                                    <span>Branch: {pipeline.branch}</span>
-                                    {pipeline.duration > 0 && <span>{formatDuration(pipeline.duration)}</span>}
-                                </div>
+                                {filter === 'all' ? 'All' : filter === 'in_progress' ? 'Running' : filter.charAt(0).toUpperCase() + filter.slice(1)}
                             </button>
                         ))}
                     </div>
                 </div>
+
+                <div className="flex-1 overflow-y-auto p-4">
+                    {loading && filteredWorkflows.length === 0 ? (
+                        <div className="flex items-center justify-center h-32">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                        </div>
+                    ) : filteredWorkflows.length === 0 ? (
+                        <div className="text-center text-gray-500 py-8">
+                            {searchTerm || filterBy !== 'all' ? 'No pipelines match your filter' : 'No pipelines found'}
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {filteredWorkflows.map((workflow) => {
+                                const status = getStatusFromWorkflow(workflow);
+                                const environment = getEnvironmentFromBranch(workflow.head_branch);
+                                
+                                return (
+                                    <button
+                                        key={workflow.id}
+                                        onClick={() => handleSelectPipeline(workflow)}
+                                        className={`w-full text-left p-4 rounded-lg border transition-colors ${
+                                            selectedWorkflow?.id === workflow.id
+                                                ? 'border-primary-500 bg-primary-50'
+                                                : 'border-gray-200 bg-white hover:bg-gray-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-start justify-between mb-2">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center space-x-2">
+                                                    <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(status)}`}>
+                                                        <span className="mr-1">{getStatusIcon(status)}</span>
+                                                        {status}
+                                                    </div>
+                                                </div>
+                                                <h3 className="font-medium text-gray-900 mt-1 truncate">{workflow.name}</h3>
+                                                <p className="text-sm text-gray-500 mt-1 truncate">
+                                                    #{workflow.run_number || workflow.id}
+                                                </p>
+                                            </div>
+                                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getEnvironmentColor(environment)}`}>
+                                                {environment}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between text-xs text-gray-500">
+                                            <span className="truncate">{workflow.repository?.full_name || 'Unknown'}</span>
+                                            <span>{formatLastRun(workflow.updated_at)}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
+                                            <span>Branch: {workflow.head_branch}</span>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {lastUpdated && (
+                    <div className="p-2 border-t border-gray-200 text-xs text-gray-500 text-center">
+                        Last updated: {formatLastRun(lastUpdated)}
+                    </div>
+                )}
             </div>
 
             {/* Pipeline Details */}
             <div className="flex-1 flex flex-col">
-                {selectedPipeline ? (
+                {selectedWorkflow ? (
                     <>
                         {/* Header */}
                         <div className="bg-white border-b border-gray-200 p-6">
                             <div className="flex items-start justify-between">
                                 <div>
                                     <div className="flex items-center space-x-3 mb-2">
-                                        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(selectedPipeline.status)}`}>
-                                            <span className="mr-2">{getStatusIcon(selectedPipeline.status)}</span>
-                                            {selectedPipeline.status}
+                                        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(getStatusFromWorkflow(selectedWorkflow))}`}>
+                                            <span className="mr-2">{getStatusIcon(getStatusFromWorkflow(selectedWorkflow))}</span>
+                                            {getStatusFromWorkflow(selectedWorkflow)}
                                         </div>
-                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getEnvironmentColor(selectedPipeline.environment)}`}>
-                                            {selectedPipeline.environment}
+                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getEnvironmentColor(getEnvironmentFromBranch(selectedWorkflow.head_branch))}`}>
+                                            {getEnvironmentFromBranch(selectedWorkflow.head_branch)}
                                         </span>
                                     </div>
-                                    <h2 className="text-2xl font-bold text-gray-900 mb-1">{selectedPipeline.name}</h2>
-                                    <p className="text-gray-600 mb-2">{selectedPipeline.description}</p>
+                                    <h2 className="text-2xl font-bold text-gray-900 mb-1">{selectedWorkflow.name}</h2>
+                                    <p className="text-gray-600 mb-2">Run #{selectedWorkflow.run_number || selectedWorkflow.id}</p>
                                     <div className="flex items-center space-x-4 text-sm text-gray-500">
-                                        <span>{selectedPipeline.repository}</span>
-                                        <span>Branch: {selectedPipeline.branch}</span>
-                                        <span>Trigger: {selectedPipeline.trigger}</span>
-                                        <span>Last run: {formatLastRun(selectedPipeline.lastRun)}</span>
-                                        {selectedPipeline.duration > 0 && <span>Duration: {formatDuration(selectedPipeline.duration)}</span>}
+                                        <span>{selectedWorkflow.repository?.full_name}</span>
+                                        <span>Branch: {selectedWorkflow.head_branch}</span>
+                                        <span>Last run: {formatLastRun(selectedWorkflow.updated_at)}</span>
+                                        <span>Duration: {getTotalDuration()}</span>
                                     </div>
                                 </div>
                                 <div className="flex space-x-2">
-                                    <button
-                                        onClick={() => handleRunPipeline(selectedPipeline)}
-                                        disabled={selectedPipeline.status === 'running'}
-                                        className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    {selectedWorkflow.status === 'in_progress' ? (
+                                        <button
+                                            onClick={handleCancelPipeline}
+                                            disabled={isCancelLoading}
+                                            className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                            {isCancelLoading ? 'Cancelling...' : 'Cancel'}
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={handleRunPipeline}
+                                            disabled={isRerunLoading}
+                                            className="bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                            {isRerunLoading ? 'Re-running...' : 'Re-run Pipeline'}
+                                        </button>
+                                    )}
+                                    <button 
+                                        onClick={handleOpenInBrowser}
+                                        className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
                                     >
-                                        {selectedPipeline.status === 'running' ? 'Running...' : 'Run Pipeline'}
-                                    </button>
-                                    <button className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
-                                        Edit Pipeline
+                                        View on GitHub
                                     </button>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Pipeline Steps */}
-                        <div className="flex-1 p-6">
-                            <div className="max-w-4xl">
-                                <h3 className="text-lg font-semibold text-gray-900 mb-4">Pipeline Steps</h3>
-                                <div className="space-y-4">
-                                    {selectedPipeline.steps.map((step, index) => (
-                                        <div key={step.id} className="flex items-start space-x-4">
-                                            {/* Step Number and Connector */}
-                                            <div className="flex flex-col items-center">
-                                                <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-sm font-medium ${step.status === 'success' ? 'border-green-500 bg-green-500 text-white' :
-                                                        step.status === 'failed' ? 'border-red-500 bg-red-500 text-white' :
-                                                            step.status === 'running' ? 'border-blue-500 bg-blue-500 text-white' :
-                                                                step.status === 'skipped' ? 'border-yellow-500 bg-yellow-500 text-white' :
-                                                                    'border-gray-300 bg-white text-gray-500'
-                                                    }`}>
-                                                    {step.status === 'running' ? (
-                                                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                                        </svg>
-                                                    ) : (
-                                                        index + 1
-                                                    )}
+                        {/* Pipeline Jobs/Steps */}
+                        <div className="flex-1 p-6 overflow-y-auto">
+                            {jobsLoading ? (
+                                <div className="flex items-center justify-center h-32">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                                    <span className="ml-3 text-gray-600">Loading pipeline steps...</span>
+                                </div>
+                            ) : workflowJobs.length === 0 ? (
+                                <div className="text-center text-gray-500 py-8">
+                                    No jobs found for this pipeline run
+                                </div>
+                            ) : (
+                                <div className="max-w-4xl space-y-6">
+                                    {workflowJobs.map((job) => (
+                                        <div key={job.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                            {/* Job Header */}
+                                            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                                                <div className="flex items-center space-x-3">
+                                                    <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(getStepStatus({ ...job, number: 0 } as WorkflowStep))}`}>
+                                                        <span className="mr-1">{getStatusIcon(getStepStatus({ ...job, number: 0 } as WorkflowStep))}</span>
+                                                        {job.status === 'completed' ? job.conclusion : job.status}
+                                                    </div>
+                                                    <h3 className="font-semibold text-gray-900">{job.name}</h3>
                                                 </div>
-                                                {index < selectedPipeline.steps.length - 1 && (
-                                                    <div className={`w-0.5 h-8 mt-2 ${step.status === 'success' || step.status === 'failed' || step.status === 'skipped' ? 'bg-gray-300' : 'bg-gray-200'
-                                                        }`}></div>
-                                                )}
+                                                <span className="text-sm text-gray-500">
+                                                    {formatDuration(job.started_at, job.completed_at)}
+                                                </span>
                                             </div>
 
-                                            {/* Step Content */}
-                                            <div className="flex-1 min-w-0">
-                                                <button
-                                                    onClick={() => handleStepClick(step)}
-                                                    className="w-full text-left bg-white border border-gray-200 rounded-lg p-4 hover:border-gray-300 transition-colors"
-                                                >
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center space-x-3">
-                                                            <h4 className="font-medium text-gray-900">{step.name}</h4>
-                                                            <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(step.status)}`}>
-                                                                <span className="mr-1">{getStatusIcon(step.status)}</span>
-                                                                {step.status}
+                                            {/* Job Steps */}
+                                            <div className="p-4">
+                                                <div className="space-y-3">
+                                                    {job.steps.map((step, index) => {
+                                                        const stepStatus = getStepStatus(step);
+                                                        return (
+                                                            <div key={step.number} className="flex items-start space-x-4">
+                                                                {/* Step Number and Connector */}
+                                                                <div className="flex flex-col items-center">
+                                                                    <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-medium ${
+                                                                        stepStatus === 'success' ? 'border-green-500 bg-green-500 text-white' :
+                                                                        stepStatus === 'failed' ? 'border-red-500 bg-red-500 text-white' :
+                                                                        stepStatus === 'running' ? 'border-blue-500 bg-blue-500 text-white' :
+                                                                        stepStatus === 'skipped' ? 'border-yellow-500 bg-yellow-500 text-white' :
+                                                                        'border-gray-300 bg-white text-gray-500'
+                                                                    }`}>
+                                                                        {stepStatus === 'running' ? (
+                                                                            <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                                            </svg>
+                                                                        ) : (
+                                                                            step.number
+                                                                        )}
+                                                                    </div>
+                                                                    {index < job.steps.length - 1 && (
+                                                                        <div className={`w-0.5 h-6 mt-1 ${
+                                                                            stepStatus === 'success' || stepStatus === 'failed' || stepStatus === 'skipped' ? 'bg-gray-300' : 'bg-gray-200'
+                                                                        }`}></div>
+                                                                    )}
+                                                                </div>
+
+                                                                {/* Step Content */}
+                                                                <div className="flex-1 min-w-0">
+                                                                    <button
+                                                                        onClick={() => handleStepClick(step, job)}
+                                                                        className="w-full text-left bg-gray-50 border border-gray-200 rounded-lg p-3 hover:border-gray-300 transition-colors"
+                                                                    >
+                                                                        <div className="flex items-center justify-between">
+                                                                            <div className="flex items-center space-x-2">
+                                                                                <span className="font-medium text-gray-900 text-sm">{step.name}</span>
+                                                                                <div className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(stepStatus)}`}>
+                                                                                    {stepStatus}
+                                                                                </div>
+                                                                            </div>
+                                                                            {step.started_at && (
+                                                                                <span className="text-xs text-gray-500">
+                                                                                    {formatDuration(step.started_at, step.completed_at)}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    </button>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                        {step.duration && (
-                                                            <span className="text-sm text-gray-500">
-                                                                {formatDuration(step.duration)}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </button>
+                                                        );
+                                                    })}
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
                                 </div>
-                            </div>
+                            )}
                         </div>
                     </>
                 ) : (
@@ -363,98 +538,8 @@ export default function Pipelines() {
                 )}
             </div>
 
-            {/* Create Pipeline Modal */}
-            {showCreateModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-gray-200">
-                            <h3 className="text-lg font-semibold text-gray-900">Create New Pipeline</h3>
-                        </div>
-                        <div className="p-6 space-y-6">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Pipeline Name</label>
-                                    <input
-                                        type="text"
-                                        placeholder="My CI/CD Pipeline"
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Environment</label>
-                                    <select className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
-                                        <option value="development">Development</option>
-                                        <option value="staging">Staging</option>
-                                        <option value="production">Production</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                                <textarea
-                                    placeholder="Describe what this pipeline does..."
-                                    rows={3}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Repository</label>
-                                    <select className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
-                                        <option value="">Select repository...</option>
-                                        <option value="user/awesome-web-app">user/awesome-web-app</option>
-                                        <option value="user/api-service">user/api-service</option>
-                                        <option value="user/mobile-client">user/mobile-client</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Branch</label>
-                                    <input
-                                        type="text"
-                                        placeholder="main"
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Trigger</label>
-                                <div className="space-y-2">
-                                    <label className="flex items-center">
-                                        <input type="checkbox" className="mr-2" />
-                                        <span className="text-sm">On push to branch</span>
-                                    </label>
-                                    <label className="flex items-center">
-                                        <input type="checkbox" className="mr-2" />
-                                        <span className="text-sm">On pull request</span>
-                                    </label>
-                                    <label className="flex items-center">
-                                        <input type="checkbox" className="mr-2" />
-                                        <span className="text-sm">Manual trigger</span>
-                                    </label>
-                                    <label className="flex items-center">
-                                        <input type="checkbox" className="mr-2" />
-                                        <span className="text-sm">Scheduled (cron)</span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="p-6 border-t border-gray-200 flex justify-end space-x-3">
-                            <button
-                                onClick={() => setShowCreateModal(false)}
-                                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors">
-                                Create Pipeline
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* Step Logs Modal */}
-            {showLogsModal && selectedStep && (
+            {showLogsModal && selectedStep && selectedJob && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col">
                         <div className="p-6 border-b border-gray-200">
@@ -462,13 +547,14 @@ export default function Pipelines() {
                                 <div>
                                     <h3 className="text-lg font-semibold text-gray-900">{selectedStep.name}</h3>
                                     <div className="flex items-center space-x-2 mt-1">
-                                        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedStep.status)}`}>
-                                            <span className="mr-1">{getStatusIcon(selectedStep.status)}</span>
-                                            {selectedStep.status}
+                                        <span className="text-sm text-gray-500">Job: {selectedJob.name}</span>
+                                        <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(getStepStatus(selectedStep))}`}>
+                                            <span className="mr-1">{getStatusIcon(getStepStatus(selectedStep))}</span>
+                                            {getStepStatus(selectedStep)}
                                         </div>
-                                        {selectedStep.duration && (
+                                        {selectedStep.started_at && (
                                             <span className="text-sm text-gray-500">
-                                                Duration: {formatDuration(selectedStep.duration)}
+                                                Duration: {formatDuration(selectedStep.started_at, selectedStep.completed_at)}
                                             </span>
                                         )}
                                     </div>
@@ -485,36 +571,74 @@ export default function Pipelines() {
                         </div>
                         <div className="flex-1 p-6 overflow-hidden">
                             <div className="bg-gray-900 text-gray-100 rounded-lg p-4 h-full overflow-y-auto font-mono text-sm">
-                                {selectedStep.status === 'pending' ? (
+                                {getStepStatus(selectedStep) === 'pending' ? (
                                     <div className="text-gray-400">Step has not started yet...</div>
-                                ) : selectedStep.status === 'running' ? (
+                                ) : getStepStatus(selectedStep) === 'running' ? (
                                     <div>
-                                        <div className="text-green-400">[2024-08-14 11:30:15] Starting {selectedStep.name}...</div>
-                                        <div className="text-blue-400">[2024-08-14 11:30:16] Setting up environment...</div>
-                                        <div className="text-white">[2024-08-14 11:30:18] Processing...</div>
-                                        <div className="text-yellow-400 animate-pulse">[2024-08-14 11:30:20] Running...</div>
+                                        <div className="text-green-400">[{selectedStep.started_at}] Starting {selectedStep.name}...</div>
+                                        <div className="text-yellow-400 animate-pulse">Running...</div>
+                                        <div className="text-gray-400 mt-4">
+                                            View detailed logs on GitHub for real-time output.
+                                        </div>
                                     </div>
                                 ) : (
                                     <div>
-                                        <div className="text-green-400">[2024-08-14 10:30:15] Starting {selectedStep.name}...</div>
-                                        <div className="text-blue-400">[2024-08-14 10:30:16] Setting up environment...</div>
-                                        <div className="text-white">[2024-08-14 10:30:18] Installing dependencies...</div>
-                                        <div className="text-white">[2024-08-14 10:30:25] Running tests...</div>
-                                        {selectedStep.status === 'success' ? (
-                                            <div className="text-green-400">[2024-08-14 10:30:45] ✓ {selectedStep.name} completed successfully</div>
-                                        ) : selectedStep.status === 'failed' ? (
-                                            <div>
-                                                <div className="text-red-400">[2024-08-14 10:30:35] ✗ Error: Test suite failed</div>
-                                                <div className="text-red-400">[2024-08-14 10:30:35] ✗ 3 tests failed, 7 passed</div>
-                                                <div className="text-red-400">[2024-08-14 10:30:35] ✗ {selectedStep.name} failed</div>
-                                            </div>
+                                        <div className="text-blue-400">[{selectedStep.started_at}] Started {selectedStep.name}</div>
+                                        {getStepStatus(selectedStep) === 'success' ? (
+                                            <>
+                                                <div className="text-green-400">[{selectedStep.completed_at}] Completed {selectedStep.name} successfully</div>
+                                                <div className="text-gray-400 mt-4">
+                                                    Detailed logs are available on GitHub Actions.
+                                                    <br />
+                                                    Click "View Logs on GitHub" to see full output.
+                                                </div>
+                                            </>
+                                        ) : getStepStatus(selectedStep) === 'failed' ? (
+                                            <>
+                                                <div className="text-red-400">[{selectedStep.completed_at}] {selectedStep.name} failed</div>
+                                                <div className="text-gray-400 mt-4">
+                                                    View detailed error logs on GitHub Actions for troubleshooting.
+                                                    <br />
+                                                    Click "View Logs on GitHub" to see full error output.
+                                                </div>
+                                            </>
                                         ) : (
-                                            <div className="text-yellow-400">[2024-08-14 10:30:35] - {selectedStep.name} was skipped</div>
+                                            <div className="text-yellow-400">[{selectedStep.completed_at}] - {selectedStep.name} was skipped</div>
                                         )}
                                     </div>
                                 )}
                             </div>
                         </div>
+                        <div className="p-4 border-t border-gray-200 flex justify-end space-x-3">
+                            <button
+                                onClick={() => setShowLogsModal(false)}
+                                className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                            >
+                                Close
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (selectedJob.html_url) {
+                                        dispatch(openWorkflowInBrowser(selectedJob.html_url));
+                                    }
+                                }}
+                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                            >
+                                View Logs on GitHub
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Error Toast */}
+            {error && (
+                <div className="fixed bottom-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg shadow-lg max-w-md">
+                    <div className="flex items-center">
+                        <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <span>{error}</span>
                     </div>
                 </div>
             )}

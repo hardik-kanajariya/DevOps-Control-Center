@@ -1,7 +1,7 @@
 import { Octokit } from '@octokit/rest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { WorkflowRun } from '../../shared/types';
+import { WorkflowRun, WorkflowJob } from '../../shared/types';
 import { AuthService } from './auth';
 import { DashboardService } from './dashboard';
 import { app } from 'electron';
@@ -149,6 +149,44 @@ export class WorkflowService {
             return formattedRuns;
         } catch (error) {
             throw new Error(`Failed to fetch workflow runs for ${owner}/${repo}: ${error}`);
+        }
+    }
+
+    /**
+     * Get jobs for a specific workflow run
+     */
+    async getWorkflowJobs(owner: string, repo: string, runId: number): Promise<WorkflowJob[]> {
+        try {
+            const octokit = await this.getOctokit();
+
+            const { data: jobsData } = await octokit.rest.actions.listJobsForWorkflowRun({
+                owner,
+                repo,
+                run_id: runId
+            });
+
+            const formattedJobs: WorkflowJob[] = jobsData.jobs.map((job: any) => ({
+                id: job.id,
+                run_id: job.run_id,
+                name: job.name,
+                status: job.status as 'queued' | 'in_progress' | 'completed' | 'waiting',
+                conclusion: job.conclusion as 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out' | undefined,
+                started_at: job.started_at,
+                completed_at: job.completed_at,
+                html_url: job.html_url,
+                steps: (job.steps || []).map((step: any) => ({
+                    name: step.name,
+                    status: step.status as 'queued' | 'in_progress' | 'completed',
+                    conclusion: step.conclusion as 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out' | undefined,
+                    number: step.number,
+                    started_at: step.started_at,
+                    completed_at: step.completed_at
+                }))
+            }));
+
+            return formattedJobs;
+        } catch (error) {
+            throw new Error(`Failed to fetch jobs for workflow run ${runId}: ${error}`);
         }
     }
 

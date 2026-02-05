@@ -227,6 +227,27 @@ export interface WorkflowRun {
     };
 }
 
+export interface WorkflowStep {
+    name: string;
+    status: 'queued' | 'in_progress' | 'completed';
+    conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out';
+    number: number;
+    started_at?: string;
+    completed_at?: string;
+}
+
+export interface WorkflowJob {
+    id: number;
+    run_id: number;
+    name: string;
+    status: 'queued' | 'in_progress' | 'completed' | 'waiting';
+    conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out';
+    started_at?: string;
+    completed_at?: string;
+    html_url: string;
+    steps: WorkflowStep[];
+}
+
 export interface AppSettings {
     theme: 'light' | 'dark';
     autoRefresh: boolean;

@@ -1,12 +1,14 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { WorkflowRun } from '../../../shared/types';
+import { WorkflowRun, WorkflowJob } from '../../../shared/types';
 
 interface WorkflowState {
     workflows: WorkflowRun[];
     selectedWorkflow: WorkflowRun | null;
     workflowYAML: string | null;
+    workflowJobs: WorkflowJob[];
     loading: boolean;
     yamlLoading: boolean;
+    jobsLoading: boolean;
     actionLoading: Record<string, boolean>;
     error: string | null;
     lastUpdated: string | null;
@@ -19,8 +21,10 @@ const initialState: WorkflowState = {
     workflows: [],
     selectedWorkflow: null,
     workflowYAML: null,
+    workflowJobs: [],
     loading: false,
     yamlLoading: false,
+    jobsLoading: false,
     actionLoading: {},
     error: null,
     lastUpdated: null,
@@ -71,6 +75,21 @@ export const fetchWorkflowYAML = createAsyncThunk(
             return response.data;
         } catch (error) {
             return rejectWithValue(error instanceof Error ? error.message : 'Failed to fetch workflow YAML');
+        }
+    }
+);
+
+export const fetchWorkflowJobs = createAsyncThunk(
+    'workflows/fetchWorkflowJobs',
+    async (params: { owner: string; repo: string; runId: number }, { rejectWithValue }) => {
+        try {
+            const response = await window.electronAPI.workflows.getJobs(params.owner, params.repo, params.runId);
+            if (!response.success) {
+                throw new Error(response.error);
+            }
+            return response.data;
+        } catch (error) {
+            return rejectWithValue(error instanceof Error ? error.message : 'Failed to fetch workflow jobs');
         }
     }
 );
@@ -142,6 +161,9 @@ const workflowsSlice = createSlice({
         clearWorkflowYAML: (state) => {
             state.workflowYAML = null;
         },
+        clearWorkflowJobs: (state) => {
+            state.workflowJobs = [];
+        },
         selectWorkflow: (state, action: PayloadAction<number>) => {
             state.selectedWorkflow = state.workflows.find(wf => wf.id === action.payload) || null;
         }
@@ -189,6 +211,20 @@ const workflowsSlice = createSlice({
             })
             .addCase(fetchWorkflowYAML.rejected, (state, action) => {
                 state.yamlLoading = false;
+                state.error = action.payload as string;
+            })
+
+            // Fetch workflow jobs
+            .addCase(fetchWorkflowJobs.pending, (state) => {
+                state.jobsLoading = true;
+                state.error = null;
+            })
+            .addCase(fetchWorkflowJobs.fulfilled, (state, action) => {
+                state.jobsLoading = false;
+                state.workflowJobs = action.payload;
+            })
+            .addCase(fetchWorkflowJobs.rejected, (state, action) => {
+                state.jobsLoading = false;
                 state.error = action.payload as string;
             })
 
@@ -246,6 +282,7 @@ export const {
     setSelectedRepository,
     clearError,
     clearWorkflowYAML,
+    clearWorkflowJobs,
     selectWorkflow
 } = workflowsSlice.actions;
 

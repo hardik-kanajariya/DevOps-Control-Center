@@ -167,6 +167,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         listRepo: secureInvoke('workflows:list-repo', ([owner, repo]) =>
             validators.isString(owner) && validators.isString(repo)
         ),
+        getJobs: secureInvoke('workflows:get-jobs', ([owner, repo, runId]) =>
+            validators.isString(owner) && validators.isString(repo) && validators.isNumber(runId)
+        ),
         getYAML: secureInvoke('workflows:get-yaml', ([owner, repo, workflowId]) =>
             validators.isString(owner) && validators.isString(repo) && validators.isNumber(workflowId)
         ),
@@ -303,6 +306,7 @@ export interface ElectronAPI {
     workflows: {
         listAll: () => Promise<IPCResponse>;
         listRepo: (owner: string, repo: string) => Promise<IPCResponse>;
+        getJobs: (owner: string, repo: string, runId: number) => Promise<IPCResponse>;
         getYAML: (owner: string, repo: string, workflowId: number) => Promise<IPCResponse>;
         cancel: (owner: string, repo: string, runId: number) => Promise<IPCResponse>;
         rerun: (owner: string, repo: string, runId: number) => Promise<IPCResponse>;
